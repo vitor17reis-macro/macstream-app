@@ -1,0 +1,53 @@
+{
+  "name": "macstream",
+  "productName": "MacStream",
+  "version": "3.0.0",
+  "description": "MacStream Cine & Pro — Edição Otimizada MacBook Air 13 (60 FPS, Cache Isolada Multi-Série, Calibração Inteligente de Legendas por Áudio & Fast Seek)",
+  "main": "main.js",
+  "scripts": {
+    "prestart": "node tests/run.js",
+    "start": "electron .",
+    "dist": "electron-builder --mac --x64",
+    "dist:arm": "electron-builder --mac --arm64",
+    "brand": "node scripts/brand-dev.js",
+    "test": "node tests/run.js",
+    "test:extra": "node tests/extra.js",
+    "test:suite50": "node tests/suite50.js",
+    "test:e2e": "electron tests/e2e.js"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "webtorrent": "^1.9.7"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "pt.macstream.app",
+    "productName": "MacStream",
+    "npmRebuild": false,
+    "files": [
+      "main.js",
+      "engine.js",
+      "engine-process.js",
+      "preload.js",
+      "renderer/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "identity": null,
+      "target": [
+        {
+          "target": "dir"
+        }
+      ],
+      "icon": "build/icon.png"
+    }
+  }
+}

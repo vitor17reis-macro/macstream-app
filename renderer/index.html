@@ -1,0 +1,2270 @@
+<!DOCTYPE html>
+<html lang="pt-PT" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' https: http: data: blob:; media-src 'self' https: http: data: blob: http://127.0.0.1:*; connect-src 'self' https: http: wss: ws: http://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'none';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MacStream</title>
+  <link rel="stylesheet" href="tailwind.css">
+  <!-- Hls.js for Hybrid HLS & IPTV Streams -->
+  <script defer src="vendor/hls.min.js"></script>
+  <!-- MPEG-TS Engine for .ts Live IPTV Streams -->
+  <script defer src="vendor/mpegts.js"></script>
+  <!-- Inter & JetBrains Mono Fonts -->
+  <link rel="stylesheet" href="fonts.css">
+
+
+  <style>
+    /* macOS Human Interface Guidelines Custom Styling */
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      background-color: #070a12;
+      background-image: radial-gradient(ellipse 85% 45% at 50% -12%, rgba(99, 102, 241, 0.14), transparent 70%);
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Ultra-thin macOS Scrollbars */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.14);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.32);
+    }
+
+    /* Glassmorphism Surfaces (GPU-friendly: only fixed bars & modals) */
+    .mac-glass {
+      background: rgba(15, 20, 32, 0.76);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      border-color: rgba(255, 255, 255, 0.09);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .mac-glass-heavy {
+      background: rgba(9, 13, 22, 0.90);
+      backdrop-filter: blur(24px) saturate(150%);
+      -webkit-backdrop-filter: blur(24px) saturate(150%);
+      border-color: rgba(255, 255, 255, 0.10);
+      box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .mac-border {
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    /* 60 FPS GPU-composited transitions */
+    .mac-transition {
+      transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease, background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.2s ease;
+    }
+
+    .poster-card {
+      contain: layout style;
+      transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease;
+    }
+
+    .poster-card:hover .poster-overlay {
+      opacity: 1;
+    }
+
+    .poster-card:hover {
+      transform: translateY(-5px) scale(1.02);
+      box-shadow: 0 20px 38px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(129, 140, 248, 0.55);
+    }
+
+    button:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+
+    /* Custom Video Subtitles Styling */
+    video::cue {
+      background: transparent;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
+      font-weight: 600;
+      font-size: 2.7vmin;
+      line-height: 1.35;
+      text-shadow: 0 0 3px #000, 0 0 3px #000, 0 1px 4px rgba(0,0,0,0.95), 1px 1px 2px #000, -1px -1px 2px #000;
+    }
+
+    /* O contentor interno das legendas (Chromium) tem tamanho próprio e alargava o espaço entre linhas */
+    video::-webkit-media-text-track-display { font-size: 2.7vmin !important; line-height: 1.3 !important; }
+
+    .poster-card { content-visibility: auto; contain-intrinsic-size: auto 330px; }
+    #catalogFilterBar select { background:#131825; border:1px solid rgba(255,255,255,.08); border-radius:.75rem; padding:.375rem .625rem; color:#e2e8f0; font-size:.75rem; }
+    .theme-chip { white-space:nowrap; }
+
+    /* Hide ugly default range styling */
+    input[type="range"] {
+      accent-color: #6366f1;
+    }
+
+
+    /* PERFORMANCE: com o player aberto, nada do resto da app é desenhado */
+    body:has(#playerModal:not(.hidden)) > header,
+    body:has(#playerModal:not(.hidden)) > #cineWorkspaceView,
+    body:has(#playerModal:not(.hidden)) > #iptvWorkspaceView,
+    body:has(#playerModal:not(.hidden)) > #detailModal { display: none !important; }
+    #playerModal, #playerModal * {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      animation: none !important;
+      transition: none !important;
+    }
+    #playerModal #playerLoadingOverlay .animate-spin { animation: spin 1s linear infinite !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Player: vídeo ocupa tudo; barras sobrepostas e escondem-se sozinhas */
+    #videoDropZone { position: absolute; inset: 0; }
+    #playerTopHud { position: absolute; top: 0; left: 0; right: 0; z-index: 25; padding-left: 84px !important; -webkit-app-region: drag; }
+    #playerTopHud button, #playerTopHud input, #playerTopHud select, #playerTopHud a { -webkit-app-region: no-drag; }
+    #playerBottomHud { position: absolute; bottom: 0; left: 0; right: 0; z-index: 25; }
+    #playerModal:fullscreen #playerTopHud { padding-left: 20px !important; }
+    #playerModal.hud-hidden #playerTopHud, #playerModal.hud-hidden #playerBottomHud { opacity: 0; pointer-events: none; }
+    #playerModal.hud-hidden { cursor: none; }
+    #detailModal { padding-top: 40px; }
+
+    .home-row { scrollbar-width: thin; scroll-snap-type: x proximity; }
+    .home-row::-webkit-scrollbar { height: 6px; }
+    .home-card { transition: transform .15s ease; }
+    .home-card:hover { transform: translateY(-3px); }
+    .top10-num { font-size: 92px; font-weight: 900; line-height: .8; margin-right: -14px; margin-bottom: 40px; color: #0b0f19; -webkit-text-stroke: 2px #6366f1; z-index: 1; font-family: -apple-system, "Inter", sans-serif; letter-spacing: -6px; }
+
+    .seek-range { -webkit-appearance: none; appearance: none; background: transparent; height: 20px; cursor: pointer; margin: 0; }
+    .seek-range::-webkit-slider-runnable-track { height: 6px; background: transparent; }
+    .seek-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -4px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #6366f1; }
+    body.is-app #playModePills { display: none !important; }
+
+    .channel-active {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.25) 0%, rgba(99, 102, 241, 0.04) 100%);
+      border-left: 3px solid #6366f1;
+    }
+
+    /* ===================================================================== */
+    /* MACSTREAM v2.3 — EDIÇÃO MACBOOK AIR 13" (2019) — 60 FPS & CLEAN UI    */
+    /* ===================================================================== */
+    body {
+      background-color: #080b12;
+      color: #f1f5f9;
+    }
+
+    /* Otimização GPU Intel UHD 617: superfícies sólidas durante o scroll na Home (zero lag de blur) */
+    #cineWorkspaceView .mac-glass {
+      background: #0d121f;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    /* Correção Definitiva do Painel de Episódios no Player (Imagem 2):
+       Fica abaixo dos 54px da barra de topo drag e força no-drag em todos os filhos! */
+    #playerEpisodesPanel,
+    #playerEpisodesPanel * {
+      -webkit-app-region: no-drag !important;
+      pointer-events: auto !important;
+    }
+    #playerEpisodesPanel {
+      top: 56px !important;
+      z-index: 60 !important;
+      background: rgba(11, 15, 25, 0.98) !important;
+      box-shadow: -18px 0 45px rgba(0, 0, 0, 0.9);
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    /* Barra Lateral Retrátil (Modo Ícones para ganhar +150px no ecrã de 13") */
+    #cineSidebar {
+      transition: width 0.18s ease;
+    }
+    #cineWorkspaceView.sidebar-collapsed #cineSidebar {
+      width: 60px !important;
+    }
+    #cineWorkspaceView.sidebar-collapsed #cineSidebar .sidebar-text,
+    #cineWorkspaceView.sidebar-collapsed #cineSidebar .sidebar-badge,
+    #cineWorkspaceView.sidebar-collapsed #cineSidebar #sidebarSystemCard {
+      display: none !important;
+    }
+    #cineWorkspaceView.sidebar-collapsed #cineSidebar .nav-dock-btn,
+    #cineWorkspaceView.sidebar-collapsed #cineSidebar #dockJumpToLiveTvBtn {
+      justify-content: center !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+
+    /* Topo "Dashboard Cinema" — Hero a 100% de largura para respiração */
+    .ms-top-dashboard {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    #heroBannerSection {
+      min-height: 236px !important;
+      max-height: 252px !important;
+      background: #101626;
+      position: relative;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+    }
+    .ms-dash-right {
+      min-height: 236px;
+      max-height: 252px;
+      background: #101626;
+      border-radius: 16px;
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+
+    /* Dimensões Explícitas em Píxeis para os Posters (7 a 8 por fila no ecrã 13" — NUNCA gigantes!) */
+    .home-row {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      contain: layout style;
+    }
+    .ms-poster-card {
+      width: 136px !important;
+      min-width: 136px !important;
+      max-width: 136px !important;
+      flex-shrink: 0;
+      cursor: pointer;
+      position: relative;
+      user-select: none;
+    }
+    .ms-poster-frame {
+      width: 136px !important;
+      height: 204px !important;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+      background: #111726;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .ms-poster-card:hover .ms-poster-frame {
+      transform: translateY(-3px);
+      border-color: rgba(99, 102, 241, 0.7);
+    }
+    .ms-poster-frame img {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      display: block;
+    }
+
+    /* Cartões Top 10 numerados */
+    .ms-rank-wrap {
+      display: flex;
+      align-items: flex-end;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .ms-rank-wrap .top10-num {
+      font-size: 74px;
+      font-weight: 900;
+      line-height: 0.8;
+      margin-right: -10px;
+      margin-bottom: 34px;
+      color: #080b12;
+      -webkit-text-stroke: 2px #6366f1;
+      z-index: 1;
+      letter-spacing: -4px;
+    }
+    .ms-rank-card {
+      width: 118px !important;
+      min-width: 118px !important;
+      max-width: 118px !important;
+      z-index: 2;
+    }
+    .ms-rank-card .ms-poster-frame {
+      width: 118px !important;
+      height: 177px !important;
+    }
+
+    /* Hover Limpo nos Posters (Sem texto de sinopse a tapar a arte!) */
+    .ms-clean-dock {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 22px 6px 6px 6px;
+      background: linear-gradient(to top, rgba(8, 11, 18, 0.96) 0%, rgba(8, 11, 18, 0.78) 65%, transparent 100%);
+      opacity: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: opacity 0.15s ease;
+      z-index: 15;
+    }
+    .ms-poster-card:hover .ms-clean-dock,
+    .ms-rank-wrap:hover .ms-clean-dock,
+    .poster-card:hover .ms-clean-dock {
+      opacity: 1;
+    }
+    .ms-qa-play {
+      flex: 1;
+      height: 26px;
+      border-radius: 7px;
+      background: #4f46e5;
+      color: #ffffff;
+      font-size: 10.5px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      white-space: nowrap;
+    }
+    .ms-qa-play:hover {
+      background: #6366f1;
+    }
+    .ms-qa-ico {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      background: rgba(19, 26, 43, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      color: #e2e8f0;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .ms-qa-ico:hover {
+      background: #334155;
+      color: #ffffff;
+    }
+    .ms-qa-ico.active-lib {
+      background: rgba(244, 63, 94, 0.28);
+      border-color: #f43f5e;
+      color: #fda4af;
+    }
+    .ms-qa-ico.active-cache {
+      background: rgba(16, 185, 129, 0.28);
+      border-color: #10b981;
+      color: #6ee7b7;
+    }
+    .ms-qa-ico.active-seen {
+      background: rgba(16, 185, 129, 0.28);
+      border-color: #10b981;
+      color: #6ee7b7;
+    }
+
+    /* Cartões Compactos 16:9 do "Continuar a Ver" + Mini-Seletor de Episódio (S03E05 ▾) */
+    .ms-cw-row {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    .ms-cw-card {
+      width: 276px !important;
+      min-width: 276px !important;
+      max-width: 276px !important;
+      flex-shrink: 0;
+      border-radius: 14px;
+      background: #111726;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      position: relative;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .ms-cw-card:hover {
+      border-color: rgba(99, 102, 241, 0.65);
+      transform: translateY(-2px);
+    }
+    .ms-cw-thumb {
+      width: 276px !important;
+      height: 120px !important;
+      position: relative;
+      overflow: hidden;
+      background: #0b0f19;
+    }
+    .ms-cw-thumb img {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      opacity: 0.78;
+    }
+    .ms-ep-quick-pop {
+      position: absolute;
+      inset: 0;
+      background: rgba(11, 15, 25, 0.97);
+      z-index: 30;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .ms-ep-quick-pop.hidden {
+      display: none !important;
+    }
+
+    /* Barra de Hubs & Filtro de Tempo (visual leve e discreto) */
+    .ms-hub-pill, .ms-time-pill {
+      padding: 5px 10px;
+      border-radius: 9999px;
+      font-size: 11.5px;
+      font-weight: 500;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #94a3b8;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+    }
+    .ms-hub-pill:hover, .ms-time-pill:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: #f1f5f9;
+    }
+    .ms-hub-pill.active {
+      background: rgba(99, 102, 241, 0.22);
+      border-color: rgba(129, 140, 248, 0.45);
+      color: #e0e7ff;
+      font-weight: 600;
+    }
+    .ms-time-pill.active {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      font-weight: 600;
+    }
+
+    /* Faixa Rápida de Canais IPTV na Home */
+    .ms-iptv-chip {
+      padding: 6px 12px;
+      border-radius: 11px;
+      background: #111726;
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      color: #e2e8f0;
+      font-size: 11.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.14s ease;
+    }
+    .ms-iptv-chip:hover {
+      background: rgba(37, 99, 235, 0.25);
+      border-color: #60a5fa;
+      transform: translateY(-1px);
+    }
+
+    /* Setas de navegação das filas */
+    .row-scroll-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: #131825;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      color: #cbd5e1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .row-scroll-btn:hover {
+      background: #4f46e5;
+      color: #ffffff;
+    }
+
+    /* Grelha do Explorador de Catálogo (proporcionada para 13") */
+    #catalogGrid {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)) !important;
+      gap: 14px !important;
+    }
+
+    /* Barra de Cores da Cache no Player (Fina e Elegante) + Fast Seek Pill */
+    #playerCacheMapBar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 4px;
+      height: 3px;
+      border-radius: 9999px;
+      overflow: hidden;
+      pointer-events: none;
+      display: flex;
+      opacity: 0.85;
+    }
+    #playerFastSeekBadge {
+      position: absolute;
+      bottom: 88px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 35;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: rgba(11, 15, 25, 0.94);
+      border: 1px solid rgba(99, 102, 241, 0.55);
+      color: #f1f5f9;
+      font-size: 11.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+    #playerFastSeekBadge.hidden {
+      display: none !important;
+    }
+    .piece-map-mini {
+      display: flex;
+      height: 5px;
+      border-radius: 9999px;
+      overflow: hidden;
+      background: #1e293b;
+      gap: 1px;
+    }
+
+
+    /* Explicit dimensions independent of Tailwind compiler */
+    #cineSidebar {
+      width: 204px !important;
+      min-width: 204px !important;
+    }
+    #cineWorkspaceView.sidebar-collapsed #cineSidebar {
+      width: 60px !important;
+      min-width: 60px !important;
+    }
+    .ms-dash-thumb {
+      width: 40px !important;
+      height: 56px !important;
+      min-width: 40px !important;
+      border-radius: 8px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .ms-poster-badge-top {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.82);
+      color: #fcd34d;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px !important;
+      line-height: 1.2 !important;
+      font-weight: 700;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .ms-poster-badge-left {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: #10b981;
+      color: #022c22;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px !important;
+      line-height: 1.2 !important;
+      font-weight: 800;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .ms-poster-badge-bottom {
+      position: absolute;
+      bottom: 6px;
+      left: 6px;
+      right: 6px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #e2e8f0;
+      font-size: 10px !important;
+      line-height: 1.25 !important;
+      font-weight: 600;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .ms-poster-card:hover .ms-poster-badge-bottom,
+    .ms-rank-wrap:hover .ms-poster-badge-bottom {
+      opacity: 0;
+    }
+
+    /* ===================================================================== */
+    /* MACSTREAM v2.5 — NOVA ARQUITETURA IPTV ZERO-SCROLL & 4 VISTAS         */
+    /* Totalmente independente do compilador estático tailwind.css           */
+    /* ===================================================================== */
+    #iptvWorkspaceView {
+      height: calc(100vh - 56px) !important;
+      max-height: calc(100vh - 56px) !important;
+      overflow: hidden !important;
+      display: flex;
+      flex-direction: column;
+      background: #070a12;
+      position: relative;
+    }
+    #iptvWorkspaceView.hidden {
+      display: none !important;
+    }
+    .ms-iptv-topbar {
+      background: #0c111d;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 8px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      flex-shrink: 0;
+      z-index: 25;
+    }
+    .ms-iptv-topbar-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .ms-iptv-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+      background: #070a12;
+    }
+    /* Proporções Estúdio Limpas: Coluna 1 (Pastas 184px) + Coluna 2 (Canais 296px) + Grande Palco Vídeo (flex: 1) */
+    #iptvSidebarPanel {
+      width: 184px !important;
+      min-width: 184px !important;
+      max-width: 184px !important;
+      height: 100% !important;
+      max-height: 100% !important;
+      background: #090d16;
+      border-right: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow: hidden;
+      z-index: 20;
+    }
+    #iptvSidebarPanel.hidden {
+      display: none !important;
+    }
+    #iptvCenterExplorerPane {
+      width: 296px;
+      min-width: 270px;
+      max-width: 320px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #070a12;
+      border-right: 1px solid rgba(255, 255, 255, 0.06);
+      flex-shrink: 0;
+    }
+    #iptvWorkspaceView[data-view="cards"] #iptvCenterExplorerPane,
+    #iptvWorkspaceView[data-view="epg"] #iptvCenterExplorerPane {
+      flex: 1 !important;
+      width: auto !important;
+      max-width: none !important;
+    }
+    #iptvCenterExplorerPane.hidden {
+      display: none !important;
+    }
+    #iptvRightPlayerColumn {
+      flex: 1;
+      min-width: 420px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: #05080f;
+      overflow-y: auto;
+      z-index: 20;
+    }
+    /* Em Modo Teatro: O Player ocupa 100% da janela sem scroll */
+    #iptvWorkspaceView[data-view="theater"] #iptvCenterExplorerPane {
+      display: none !important;
+    }
+    #iptvWorkspaceView[data-view="theater"] #iptvRightPlayerColumn {
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: 1 !important;
+      overflow: hidden !important;
+    }
+    #iptvWorkspaceView[data-view="theater"] #iptvVideoStageWrapper {
+      flex: 1 !important;
+      height: 100% !important;
+      min-height: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+    #iptvWorkspaceView[data-view="theater"] #iptvPlayersGrid {
+      flex: 1 !important;
+      height: 100% !important;
+      min-height: 0 !important;
+    }
+    #iptvWorkspaceView[data-view="theater"] #iptvPrimaryVideo,
+    #iptvWorkspaceView[data-view="theater"] #iptvSecondaryVideo {
+      max-height: calc(100vh - 155px) !important;
+      height: 100% !important;
+    }
+    #iptvWorkspaceView[data-view="theater"] #iptvLowerEpgSection {
+      display: none !important;
+    }
+    /* Em Vista Cartões ou Guia EPG: O Explorador ocupa o centro todo e o Vídeo vira Mini-Player Docked no canto inferior direito */
+    #iptvWorkspaceView[data-view="cards"] #iptvRightPlayerColumn,
+    #iptvWorkspaceView[data-view="epg"] #iptvRightPlayerColumn {
+      position: absolute !important;
+      right: 16px !important;
+      bottom: 16px !important;
+      width: 336px !important;
+      min-width: 336px !important;
+      max-width: 336px !important;
+      height: auto !important;
+      max-height: 256px !important;
+      border-radius: 16px !important;
+      border: 1px solid rgba(99, 102, 241, 0.45) !important;
+      background: rgba(11, 15, 25, 0.96) !important;
+      box-shadow: 0 22px 50px rgba(0, 0, 0, 0.88) !important;
+      overflow: hidden !important;
+      z-index: 35 !important;
+    }
+    #iptvWorkspaceView[data-view="cards"] #iptvLowerEpgSection,
+    #iptvWorkspaceView[data-view="epg"] #iptvLowerEpgSection {
+      display: none !important;
+    }
+    #iptvWorkspaceView[data-view="cards"] #iptvPlayersGrid,
+    #iptvWorkspaceView[data-view="epg"] #iptvPlayersGrid {
+      min-height: 175px !important;
+      max-height: 175px !important;
+    }
+    #iptvWorkspaceView[data-view="cards"] #iptvPrimaryVideo,
+    #iptvWorkspaceView[data-view="epg"] #iptvPrimaryVideo {
+      max-height: 175px !important;
+    }
+    /* Grelha de Cartões IPTV */
+    .ms-iptv-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+      gap: 12px;
+      padding: 14px;
+      overflow-y: auto;
+      flex: 1;
+      align-content: start;
+    }
+    .ms-iptv-cards-grid.hidden,
+    #iptvCardsGridContainer.hidden,
+    #iptvEpgTimelineContainer.hidden,
+    #iptvChannelListContainer.hidden {
+      display: none !important;
+    }
+    .ms-iptv-card {
+      background: #101625;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 9px;
+      cursor: pointer;
+      transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+    }
+    .ms-iptv-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(99, 102, 241, 0.55);
+      background: #141c2f;
+    }
+    .ms-iptv-card.active {
+      border-color: #6366f1;
+      background: linear-gradient(135deg, rgba(79, 70, 229, 0.22) 0%, rgba(16, 22, 37, 0.95) 100%);
+      box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.25);
+    }
+    /* Logótipo / Monograma de Canal */
+    .ms-ch-logo {
+      width: 38px;
+      height: 38px;
+      min-width: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #a5b4fc;
+      letter-spacing: -0.4px;
+      flex-shrink: 0;
+    }
+    .ms-ch-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      padding: 3px;
+      display: block;
+    }
+    /* Pílulas de variante de qualidade discretas */
+    .ms-q-pill {
+      padding: 1px 5px;
+      border-radius: 5px;
+      font-size: 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(255, 255, 255, 0.04);
+      color: #94a3b8;
+      cursor: pointer;
+      transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+    .ms-q-pill:hover {
+      border-color: rgba(129, 140, 248, 0.5);
+      color: #ffffff;
+    }
+    .ms-q-pill.active {
+      background: rgba(99, 102, 241, 0.25);
+      border-color: rgba(129, 140, 248, 0.55);
+      color: #e0e7ff;
+    }
+    /* Popover Flutuante de Sinal & Watchdog */
+    .ms-signal-popover {
+      position: absolute;
+      top: 52px;
+      right: 16px;
+      width: 330px;
+      background: rgba(15, 21, 35, 0.98);
+      border: 1px solid rgba(99, 102, 241, 0.45);
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9);
+      z-index: 50;
+    }
+    .ms-signal-popover.hidden {
+      display: none !important;
+    }
+
+  </style>
+</head>
+
+<body class="h-screen w-screen flex flex-col bg-[#0b0f19] text-slate-100">
+
+  <!-- ========================================================================= -->
+  <!-- TOP MACOS WINDOW CHROME, HYBRID MODE SWITCHER & SPOTLIGHT SEARCH BAR      -->
+  <!-- ========================================================================= -->
+  <header class="h-14 shrink-0 mac-glass border-b px-3 sm:px-4 flex items-center justify-between gap-2 sm:gap-3 z-30">
+    <!-- Left: macOS Traffic Lights + Sidebar Toggle + Brand Identity -->
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div class="hidden sm:flex items-center gap-1.5 mr-0.5" title="Controlos de Janela macOS">
+        <span class="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e] inline-block shadow-inner"></span>
+        <span class="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123] inline-block shadow-inner"></span>
+        <span class="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29] inline-block shadow-inner"></span>
+      </div>
+
+      <button id="toggleIptvSidebarBtn" type="button" class="hidden p-2 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border mac-transition" title="Modo Teatro: Mostrar/Ocultar Lista Lateral (Atalho: S)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h10M4 18h16" />
+        </svg>
+      </button>
+
+      <div class="flex items-center gap-2 cursor-pointer" id="brandHomeBtn">
+        <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-600 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 shrink-0 border border-white/15">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div class="truncate hidden md:block">
+          <span class="font-bold text-sm tracking-tight text-white">MacStream</span>
+          <p id="headerSubStatus" class="hidden"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center-Left: macOS Segmented Mode Switcher (Cine Stremio vs TV Direto IPTV) -->
+    <div class="flex items-center bg-[#0b0f19]/90 p-1 rounded-xl border mac-border shrink-0">
+      <button id="switchModeCineBtn" type="button" class="px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm mac-transition flex items-center gap-1.5">
+        <span>🍿 Cine</span>
+      </button>
+      <button id="switchModeIptvBtn" type="button" class="px-2.5 sm:px-3 py-1 rounded-lg text-xs font-medium text-slate-300 hover:text-white mac-transition flex items-center gap-1.5">
+        <span>📺 TV Direto</span>
+        <span id="headerIptvCountBadge" class="hidden sm:inline text-[10px] font-mono px-1 rounded bg-blue-500/20 text-blue-300">IPTV</span>
+      </button>
+    </div>
+
+    <!-- Center-Right: Unified Global Spotlight Search (Cmd+K) -->
+    <div class="flex-1 max-w-lg mx-2">
+      <div class="relative flex items-center">
+        <svg class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+        </svg>
+        <input
+          id="globalSearchInput"
+          type="text"
+          placeholder="Pesquisar filmes, séries ou canais (⌘K)"
+          class="w-full bg-[#131825]/80 border mac-border focus:border-indigo-500 rounded-xl pl-9 pr-14 py-1.5 text-xs text-slate-100 placeholder-slate-400 focus:outline-none mac-transition"
+        />
+        <button id="clearSearchBtn" type="button" class="hidden absolute right-9 text-slate-400 hover:text-white text-xs px-1.5" title="Limpar pesquisa">✕</button>
+        <kbd class="text-[10px] font-mono text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded border mac-border absolute right-2 pointer-events-none">⌘K</kbd>
+        <div id="searchSuggest" class="hidden absolute top-full left-0 right-0 mt-1 rounded-xl bg-[#131825] border mac-border shadow-2xl z-40 overflow-hidden text-xs" style="-webkit-app-region:no-drag"></div>
+      </div>
+    </div>
+
+    <!-- Right: Compact Action Buttons -->
+    <div class="flex items-center gap-1.5 shrink-0">
+      <button id="openMagnetModalBtn" type="button" class="p-2 rounded-xl text-xs font-medium bg-[#131825]/80 hover:bg-slate-800 text-indigo-300 border mac-border mac-transition flex items-center gap-1" title="Colar Magnet Link ou abrir ficheiro .torrent">
+        <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+        </svg>
+      </button>
+
+      <button id="headerMultiViewBtn" type="button" class="hidden sm:flex items-center gap-1 p-2 rounded-xl text-xs font-medium bg-[#131825]/80 hover:bg-slate-800 text-blue-300 border mac-border mac-transition" title="Abrir TV Direto em Duplo Ecrã (2 Canais em simultâneo)">
+        <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="8" height="16" rx="1" />
+          <rect x="13" y="4" width="8" height="16" rx="1" />
+        </svg>
+        <span id="headerMultiViewLabel" class="hidden">Duplo Ecrã</span>
+      </button>
+
+      <button id="openXtreamModalBtn" type="button" class="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-[#131825]/80 hover:bg-slate-800 text-slate-200 border mac-border mac-transition flex items-center gap-1" title="Configurar Servidor IPTV Xtream Codes ou Importar Lista .M3U">
+        <span>📡</span>
+        <span class="hidden xl:inline">IPTV</span>
+      </button>
+
+      <button id="headerBackupStatusBtn" type="button" class="hidden" title="Persistência Local">
+        <span id="headerBackupStatusLabel">Local</span>
+      </button>
+
+      <button id="openSettingsModalBtn" type="button" class="p-2 rounded-xl text-xs font-semibold bg-[#131825]/80 hover:bg-slate-800 text-slate-200 border mac-border mac-transition flex items-center justify-center" title="Definições, Add-ons, Debrid & Backup">
+        <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- WORKSPACE 1: STREMIO / TORRENTIO CINE VIEW (ON-DEMAND P2P & TMDB)         -->
+  <!-- ========================================================================= -->
+  <div id="cineWorkspaceView" class="flex-1 flex min-h-0 overflow-hidden">
+
+    <!-- LEFT NAVIGATION DOCK (macOS Sidebar / Retrátil) -->
+    <aside id="cineSidebar" class="w-16 md:w-52 shrink-0 bg-[#0d121f] border-r mac-border flex flex-col justify-between py-2.5 px-2 select-none z-20">
+      <nav class="space-y-1">
+        <div class="flex items-center justify-between px-2 pb-1.5 mb-1 border-b mac-border">
+          <span class="sidebar-text text-[10px] font-mono uppercase tracking-wider text-slate-400">Navegação</span>
+          <button id="collapseSidebarBtn" type="button" class="p-1.5 rounded-lg bg-[#131825] hover:bg-slate-800 text-slate-300 hover:text-white border mac-border text-xs" title="Encolher / Expandir Barra Lateral (Atalho: \)">⇄</button>
+        </div>
+        <button type="button" data-nav="discover" class="nav-dock-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 text-white shadow-md shadow-indigo-600/20 mac-transition">
+          <div class="flex items-center gap-3 truncate">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+            <span class="sidebar-text hidden md:inline truncate">Início (Home)</span>
+          </div>
+        </button>
+
+        <button type="button" data-nav="movies" class="nav-dock-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white mac-transition">
+          <div class="flex items-center gap-3 truncate">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+            </svg>
+            <span class="sidebar-text hidden md:inline truncate">Catálogo Filmes</span>
+          </div>
+        </button>
+
+        <button type="button" data-nav="series" class="nav-dock-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white mac-transition">
+          <div class="flex items-center gap-3 truncate">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <span class="sidebar-text hidden md:inline truncate">Catálogo Séries</span>
+          </div>
+        </button>
+
+        <button type="button" data-nav="continue" class="nav-dock-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white mac-transition">
+          <div class="flex items-center gap-3 truncate">
+            <svg class="w-4 h-4 shrink-0 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span class="sidebar-text hidden md:inline truncate">Continuar a Ver</span>
+          </div>
+          <span id="dockContinueBadge" class="hidden md:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300">0</span>
+        </button>
+
+        <button type="button" data-nav="library" class="nav-dock-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white mac-transition">
+          <div class="flex items-center gap-3 truncate">
+            <svg class="w-4 h-4 shrink-0 text-rose-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+            </svg>
+            <span class="sidebar-text hidden md:inline truncate">A Minha Biblioteca</span>
+          </div>
+          <span id="dockLibraryBadge" class="hidden md:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-300">0</span>
+        </button>
+
+        <div class="pt-2 mt-2 border-t mac-border">
+          <button id="dockJumpToLiveTvBtn" type="button" class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/25 mac-transition">
+            <div class="flex items-center gap-3 truncate">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+              <span class="sidebar-text hidden md:inline truncate">TV Direto (IPTV)</span>
+            </div>
+            <span class="hidden md:inline text-[10px] font-mono">→</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Bottom System Info Card (Clean & Collapsible) -->
+      <div id="sidebarSystemCard" class="hidden md:block p-2.5 rounded-xl bg-[#090d16]/80 border mac-border space-y-2">
+        <div class="flex items-center justify-between text-[10px] text-slate-400">
+          <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> P2P</span>
+          <span class="font-mono text-emerald-400" id="ecoHudLabel">Em pausa</span>
+        </div>
+        <button id="privateModeBtn" type="button" class="w-full py-1.5 rounded-lg bg-[#131825] hover:bg-slate-800 text-[11px] font-medium text-slate-200 border mac-border mac-transition" title="Não grava histórico de visualização, IPTV nem pesquisas durante a sessão">🕵️ Modo Privado: OFF</button>
+        <button id="syncCatalogBtn" type="button" class="w-full py-1.5 rounded-lg bg-[#131825] hover:bg-slate-800 text-[11px] font-medium text-slate-200 border mac-border flex items-center justify-center gap-1.5 mac-transition">
+          <svg id="syncIcon" class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Atualizar Feed</span>
+        </button>
+        <details class="pt-1 border-t mac-border">
+          <summary class="cursor-pointer text-[10px] text-slate-400 hover:text-slate-200 select-none flex items-center justify-between">
+            <span>⚙️ Ferramentas &amp; Estado</span>
+            <span id="sidebarCacheCountBadge" class="font-mono text-indigo-300">0 ep</span>
+          </summary>
+          <div class="mt-2 space-y-1.5">
+            <div class="flex items-center justify-between text-[10px] text-slate-500">
+              <span>MacBook Air 13"</span>
+              <span id="dbStatusBadge" class="font-mono text-emerald-400">60 FPS</span>
+            </div>
+            <div class="text-[10px] text-slate-500 truncate">
+              Fonte: <span id="activeMetadataProviderLabel" class="text-indigo-300">Cinemeta + TMDB</span>
+            </div>
+            <select id="cacheExitPolicySelect" class="w-full bg-[#131825] border mac-border rounded-lg px-1.5 py-1 text-[10px] text-slate-200 focus:outline-none">
+              <option value="pause">⏸ Pausar ao sair</option>
+              <option value="continue">⬇ Continuar até 100%</option>
+            </select>
+            <button id="clearHistoryBtn" type="button" class="w-full py-1 rounded-lg bg-[#131825] hover:bg-rose-950/60 text-[10px] font-medium text-slate-300 hover:text-rose-200 border mac-border mac-transition">🗑️ Limpar Histórico</button>
+            <button id="copyReportBtn" type="button" class="w-full py-1 rounded-lg bg-[#131825] hover:bg-slate-800 text-[10px] font-medium text-slate-300 border mac-border mac-transition">📋 Copiar relatório</button>
+            <button id="clearCacheBtn" type="button" class="hidden w-full py-1 rounded-lg bg-[#131825] hover:bg-slate-800 text-[10px] font-medium text-slate-300 border mac-border mac-transition">🧹 Libertar espaço</button>
+          </div>
+        </details>
+      </div>
+    </aside>
+
+    <!-- ========================================================================= -->
+    <!-- MAIN SCROLLABLE STAGE — EDIÇÃO MACBOOK AIR 13" (60 FPS + DASHBOARD)       -->
+    <!-- ========================================================================= -->
+    <main id="mainCatalogViewport" class="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-5">
+
+      <!-- A1: TOPO DIVIDIDO "DASHBOARD CINEMA" (HERO COMPACTO + PAINEL CACHE / A SEGUIR) -->
+      <div id="homeTopDashboard" class="ms-top-dashboard">
+        <!-- ESQUERDA: HERO COMPACTO APPLE TV+ -->
+        <section id="heroBannerSection" class="flex items-end">
+          <img
+            id="heroBackdropImg"
+            src="https://images.metahub.space/background/medium/tt15239678/img"
+            alt="Destaque"
+            class="absolute inset-0 w-full h-full object-cover object-center opacity-45"
+            data-fb="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201280%20500%22%20width%3D%221280%22%20height%3D%22500%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%23131825%22%2F%3E%3Ctext%20x%3D%2250%25%22%20y%3D%2250%25%22%20dominant-baseline%3D%22middle%22%20text-anchor%3D%22middle%22%20fill%3D%22%236366f1%22%20font-family%3D%22-apple-system%2Csans-serif%22%20font-size%3D%2228%22%20font-weight%3D%22700%22%3EMacStream%20Cine%3C%2Ftext%3E%3C%2Fsvg%3E"
+          />
+          <div class="absolute inset-0 bg-gradient-to-t from-[#080b12] via-[#080b12]/70 to-transparent"></div>
+          <div class="absolute inset-0 bg-gradient-to-r from-[#080b12] via-[#080b12]/65 to-transparent"></div>
+
+          <div class="absolute top-3 right-3 z-20 flex items-center gap-1.5">
+            <button id="heroPrevBtn" type="button" class="row-scroll-btn" title="Anterior">‹</button>
+            <button id="heroNextBtn" type="button" class="row-scroll-btn" title="Seguinte">›</button>
+          </div>
+          <div id="heroDots" class="absolute bottom-3 right-4 z-20 flex items-center gap-1.5"></div>
+
+          <div class="relative z-10 p-4 sm:p-5 flex items-end gap-4 w-full">
+            <img id="heroPosterThumb" src="https://images.metahub.space/poster/medium/tt15239678/img" alt="" class="hidden sm:block rounded-xl border mac-border object-cover shrink-0 shadow-xl" style="width:88px;height:132px" />
+            <div class="space-y-2 min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-1.5 text-xs">
+                <span id="heroTag" class="px-2 py-0.5 rounded-md bg-indigo-500/25 text-indigo-200 border border-indigo-500/35 font-bold text-[10px]">Em destaque</span>
+                <span id="heroImdbBadge" class="px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold text-[11px]">★ 8.6 IMDb</span>
+                <span id="heroYearGenre" class="text-slate-300 font-medium text-[11px] truncate">2024 • Ficção Científica, Aventura</span>
+                <span id="heroCacheBadge" class="hidden px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold text-[10px]">⚡ Em Cache</span>
+              </div>
+
+              <h1 id="heroTitle" class="text-xl sm:text-2xl font-extrabold tracking-tight text-white truncate">Dune: Parte Dois</h1>
+
+              <p id="heroOverview" class="text-xs text-slate-300 line-clamp-2 leading-relaxed max-w-xl">
+                Paul Atreides une-se a Chani e aos Fremen enquanto procura vingança contra os conspiradores que destruíram a sua família.
+              </p>
+
+              <div class="pt-1 flex flex-wrap items-center gap-2">
+                <button id="heroQuickPlayBtn" type="button" class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow flex items-center gap-1.5">
+                  <span>▶</span>
+                  <span id="heroQuickPlayLabel">Ver agora</span>
+                </button>
+                <button id="heroWatchBtn" type="button" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold border mac-border flex items-center gap-1">
+                  <span>☰</span>
+                  <span id="heroDetailBtnLabel">Episódios &amp; Fontes</span>
+                </button>
+                <button id="heroPreloadBtn" type="button" class="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold border border-emerald-500/35 flex items-center gap-1" title="Guardar episódio na pasta de Cache no disco">
+                  <span>⚡</span>
+                  <span id="heroPreloadLabel">Cache</span>
+                </button>
+                <button id="heroLibraryBtn" type="button" class="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/15 text-slate-200 text-xs font-medium border mac-border flex items-center gap-1">
+                  <span id="heroLibraryIcon">＋</span>
+                  <span id="heroLibraryLabel">Biblioteca</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- CACHE COMPACTA COLAPSÁVEL (NÃO OCUPA ESPAÇO NO ECRÃ INICIAL) -->
+        <section id="episodeCacheSection" class="rounded-2xl bg-[#0e1320]/70 border mac-border px-3.5 py-2">
+          <details class="group">
+            <summary class="flex items-center justify-between gap-2 cursor-pointer select-none list-none">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
+                <span class="text-xs font-semibold text-slate-200 truncate">⚡ Cache em Disco</span>
+                <span class="text-[11px] text-slate-500 hidden sm:inline">• Clica para gerir episódios descarregados</span>
+              </div>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <span id="episodeCacheSizeBadge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">0 MB</span>
+                <button id="clearAllEpisodeCacheBtn" type="button" class="px-1.5 py-0.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 text-[10px]" title="Limpar pasta de Cache">🗑</button>
+                <span class="text-slate-400 text-[10px] group-open:rotate-180 transition-transform">▾</span>
+              </div>
+            </summary>
+            <div class="mt-2 pt-2 border-t mac-border space-y-2">
+              <div id="episodeCacheGrid" class="flex flex-col justify-start gap-1.5 max-h-44 overflow-y-auto"></div>
+              <div class="hidden">
+                <button type="button" id="dashOpenAddonStoreBtn">Add-ons</button>
+                <button type="button" id="dashQuickBackupBtn">Backup</button>
+              </div>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <!-- S2 & S3: FILTROS COMPACTOS (1 LINHA CALMA) -->
+      <section id="homeHubsAndTimeBar" class="flex flex-wrap items-center justify-between gap-2 py-1">
+        <div class="flex items-center gap-1.5 overflow-x-auto">
+          <button type="button" data-hub="foryou" class="ms-hub-pill active">✨ Para Ti</button>
+          <button type="button" data-hub="crime" class="ms-hub-pill">🕵️ Crime</button>
+          <button type="button" data-hub="prestige" class="ms-hub-pill">👑 Drama</button>
+          <button type="button" data-hub="scifi" class="ms-hub-pill">🚀 Sci-Fi</button>
+          <button type="button" data-hub="comedy" class="ms-hub-pill">😂 Comédia</button>
+          <button type="button" data-hub="action" class="ms-hub-pill">🔥 Ação</button>
+        </div>
+        <div class="flex items-center gap-1 overflow-x-auto">
+          <button type="button" data-timepill="all" class="ms-time-pill active">Todos</button>
+          <button type="button" data-timepill="25" class="ms-time-pill" title="Episódios curtos (~25 min)">~25m</button>
+          <button type="button" data-timepill="50" class="ms-time-pill" title="Séries (~50 min)">~50m</button>
+          <button type="button" data-timepill="95" class="ms-time-pill" title="Filmes até 1h40">≤1h40</button>
+          <button type="button" data-timepill="120" class="ms-time-pill" title="Cinema (+2 horas)">+2h</button>
+          <button id="surpriseBtn" type="button" class="ms-time-pill" title="Escolher um título surpresa">🎲 Surpresa</button>
+        </div>
+      </section>
+
+      <section id="homeStatsStrip" class="hidden"></section>
+
+      <!-- S1 & S4: CONTINUAR A VER -->
+      <section id="continueWatchingSection" class="hidden space-y-2.5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+            <h2 class="text-sm font-bold text-white tracking-tight">Continuar a ver</h2>
+          </div>
+          <button id="clearHistoryBtn" type="button" class="text-[11px] text-slate-400 hover:text-rose-400">
+            Limpar
+          </button>
+        </div>
+        <div id="continueWatchingGrid" class="ms-cw-row"></div>
+      </section>
+
+      <!-- FILA EM DESTAQUE DO HUB / TEMPO ESCOLHIDO -->
+      <div id="hubSpotlightContainer"></div>
+
+      <!-- S5: FAIXA RÁPIDA DE ZAPPING TV EM DIRETO (IPTV) NA HOME -->
+      <section id="homeIptvQuickStrip" class="p-3 rounded-2xl bg-[#0e1320] border mac-border space-y-2">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+            <h2 class="text-xs sm:text-sm font-bold text-white">📡 Zapping Rápido — TV em Direto (IPTV)</h2>
+            <span id="homeIptvTotalLabel" class="text-[11px] font-mono text-blue-300"></span>
+          </div>
+          <button id="homeOpenIptvBtn" type="button" class="text-[11px] font-semibold text-blue-400 hover:text-blue-300">
+            Abrir grelha IPTV completa →
+          </button>
+        </div>
+        <div id="homeIptvChipsRow" class="flex items-center gap-2 overflow-x-auto pb-1"></div>
+      </section>
+
+      <!-- FILAS PERSONALIZADAS DA HOME (POSTERS LIMPOS 136px — 7 A 8 POR FILA) -->
+      <div id="homeRows" class="space-y-5"></div>
+
+      <!-- BOTÃO DISCRETO PARA ABRIR O EXPLORADOR DE CATÁLOGO -->
+      <div id="openExplorerBanner" class="py-2 flex items-center justify-between gap-3 border-t mac-border">
+        <span class="text-xs text-slate-400">Procuras por década, nota IMDb ou género específico?</span>
+        <button id="showFullCatalogBtn" type="button" class="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-indigo-600 text-slate-100 hover:text-white text-xs font-semibold shrink-0 mac-transition">
+          🔍 Explorar Catálogo Completo
+        </button>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- EXPLORADOR DE CATÁLOGO COMPLETO & BARRA UNIFICADA DE FILTROS              -->
+      <!-- ========================================================================= -->
+      <section id="catalogExplorerSection" class="hidden space-y-4 pt-2 border-t mac-border">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <h2 id="catalogSectionHeading" class="text-sm sm:text-base font-extrabold text-white tracking-tight">Explorar todo o catálogo</h2>
+            <span id="catalogCountLabel" class="text-xs font-mono px-2 py-0.5 rounded-lg bg-[#131825] border mac-border text-indigo-300">0 títulos</span>
+          </div>
+          <button id="backToHomeFromCatalogBtn" type="button" class="px-3 py-1 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200">
+            ← Voltar à Home
+          </button>
+        </div>
+
+        <div class="p-3 rounded-2xl bg-[#0e1320] border mac-border space-y-2.5">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <button type="button" data-genre="ALL" class="genre-pill px-3 py-1 rounded-xl text-xs font-semibold bg-indigo-600 text-white">Todos</button>
+              <button type="button" data-genre="Action" class="genre-pill px-3 py-1 rounded-xl text-xs font-medium bg-[#131825] hover:bg-slate-800 text-slate-300 border mac-border">Ação</button>
+              <button type="button" data-genre="Sci-Fi" class="genre-pill px-3 py-1 rounded-xl text-xs font-medium bg-[#131825] hover:bg-slate-800 text-slate-300 border mac-border">Ficção Científica</button>
+              <button type="button" data-genre="Drama" class="genre-pill px-3 py-1 rounded-xl text-xs font-medium bg-[#131825] hover:bg-slate-800 text-slate-300 border mac-border">Drama</button>
+              <button type="button" data-genre="Thriller" class="genre-pill px-3 py-1 rounded-xl text-xs font-medium bg-[#131825] hover:bg-slate-800 text-slate-300 border mac-border">Suspense / Crime</button>
+              <button type="button" data-genre="Comedy" class="genre-pill px-3 py-1 rounded-xl text-xs font-medium bg-[#131825] hover:bg-slate-800 text-slate-300 border mac-border">Comédia</button>
+              <button type="button" data-genre="Animation" class="genre-pill px-3 py-1 rounded-xl text-xs font-medium bg-[#131825] hover:bg-slate-800 text-slate-300 border mac-border">Animação</button>
+            </div>
+
+            <div id="catalogFilterBar" class="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+              <select id="fltGenre" title="Género"></select>
+              <select id="fltDecade" title="Época">
+                <option value="">Qualquer época</option>
+                <option value="2020">Anos 2020</option>
+                <option value="2010">Anos 2010</option>
+                <option value="2000">Anos 2000</option>
+                <option value="1990">Anos 90</option>
+                <option value="1980">Anos 80</option>
+                <option value="pre1980">Antes de 1980</option>
+              </select>
+              <select id="fltRating" title="Nota mínima">
+                <option value="0">Qualquer nota</option>
+                <option value="6">★ 6+</option>
+                <option value="7">★ 7+</option>
+                <option value="7.5">★ 7.5+</option>
+                <option value="8">★ 8+</option>
+                <option value="8.5">★ 8.5+</option>
+              </select>
+              <select id="catalogSortSelect" class="bg-[#131825] border mac-border rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none">
+                <option value="popular">Popularidade</option>
+                <option value="rating">Nota IMDb</option>
+                <option value="year">Mais Recentes</option>
+              </select>
+              <label class="flex items-center gap-1.5 cursor-pointer select-none px-2 py-1 rounded-xl bg-[#131825] border mac-border text-slate-200">
+                <input id="fltHideSeen" type="checkbox" class="accent-indigo-500"> Só por ver
+              </label>
+              <button id="fltReset" type="button" class="hidden px-2.5 py-1 rounded-xl bg-rose-500/20 text-rose-200 border border-rose-500/30 font-semibold">✕ Limpar</button>
+            </div>
+          </div>
+          <div id="catalogThemes" class="flex items-center gap-1.5 overflow-x-auto pt-1 border-t mac-border"></div>
+        </div>
+
+        <div id="catalogGrid"></div>
+        <div id="catalogSentinel" class="py-6 text-center text-xs text-slate-500"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- WORKSPACE 2: MACSTREAM PRO LIVE IPTV ENGINE v2.5 (ZERO-SCROLL 4 VISTAS)   -->
+  <!-- ========================================================================= -->
+  <div id="iptvWorkspaceView" data-view="workspace" class="hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+
+    <!-- BARRA DE COMANDO ÚNICA E LIMPA DO ESTÚDIO IPTV (50px, ZERO POLUIÇÃO VISUAL) -->
+    <div id="iptvTopNavHeader" class="ms-iptv-topbar" style="padding: 8px 16px;">
+      <div class="ms-iptv-topbar-row">
+        <!-- Esquerda: Secções de Conteúdo -->
+        <div class="flex items-center gap-0.5 bg-[#080b12]/80 p-0.5 rounded-xl border mac-border">
+          <button type="button" data-iptv-section="live" class="iptv-tab-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-600 text-white mac-transition flex items-center gap-1.5">
+            <span>Canais</span>
+            <span id="countLiveBadge" class="text-[10px] opacity-80 font-mono">0</span>
+          </button>
+          <button type="button" data-iptv-section="vod" class="iptv-tab-btn px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white mac-transition flex items-center gap-1">
+            <span>Filmes</span>
+            <span id="countVodBadge" class="hidden">0</span>
+          </button>
+          <button type="button" data-iptv-section="series" class="iptv-tab-btn px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white mac-transition flex items-center gap-1">
+            <span>Séries</span>
+            <span id="countSeriesBadge" class="hidden">0</span>
+          </button>
+          <button type="button" data-iptv-section="favs" class="iptv-tab-btn px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white mac-transition flex items-center gap-1">
+            <span>Favoritos</span>
+            <span id="countFavsBadge" class="text-[10px] opacity-65 font-mono">0</span>
+          </button>
+          <button type="button" data-iptv-section="history" class="iptv-tab-btn px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white mac-transition flex items-center gap-1">
+            <span>Recentes</span>
+            <span id="countHistoryBadge" class="hidden">0</span>
+          </button>
+        </div>
+
+        <!-- Centro: Filtros Rápidos de Região + Pesquisa Instantânea -->
+        <div class="flex items-center gap-2 flex-1 justify-center min-w-[260px]">
+          <div id="iptvPortalPillsBar" class="hidden xl:flex items-center gap-1 text-[11px]">
+            <button type="button" data-portal="ALL" class="iptv-portal-pill px-2.5 py-1 rounded-lg font-semibold bg-indigo-600 text-white">🌍 Todos</button>
+            <button type="button" data-portal="PT" class="iptv-portal-pill px-2.5 py-1 rounded-lg font-medium bg-[#131825] text-slate-300 hover:text-white border mac-border">🇵🇹 Portugal</button>
+            <button type="button" data-portal="SPORT" class="iptv-portal-pill px-2.5 py-1 rounded-lg font-medium bg-[#131825] text-emerald-300 hover:text-white border mac-border">⚽ Desporto</button>
+            <button type="button" data-portal="CINE" class="iptv-portal-pill px-2.5 py-1 rounded-lg font-medium bg-[#131825] text-indigo-300 hover:text-white border mac-border">🎬 Cinema</button>
+            <button type="button" data-portal="PINNED" class="iptv-portal-pill px-2.5 py-1 rounded-lg font-medium bg-[#131825] text-amber-300 hover:text-white border mac-border">📌 Fixadas</button>
+          </div>
+          <div class="relative flex-1 max-w-xs">
+            <input id="iptvLocalFilterInput" type="text" placeholder="Filtrar canais..." class="w-full bg-white/5 border mac-border rounded-lg px-3 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+          </div>
+          <span id="iptvRichExplorerCountBadge" class="hidden 2xl:inline-block text-[10px] font-mono px-2 py-1 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">0 canais</span>
+        </div>
+
+        <!-- Direita: Agrupamento + Vistas + Sinal -->
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button id="iptvGroupVariantsBtn" type="button" class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-white/5 hover:bg-white/10 text-slate-300 border mac-border mac-transition" title="Agrupa automaticamente variantes (4K / FHD / HD / LOW) num único canal limpo">
+            🔗 Agrupar
+          </button>
+
+          <div class="flex items-center gap-0.5 bg-[#080b12]/80 p-0.5 rounded-xl border mac-border">
+            <button type="button" data-iptv-view="workspace" class="iptv-view-mode-btn px-2 py-1 rounded-lg text-[11px] font-semibold bg-indigo-600 text-white mac-transition">Estúdio</button>
+            <button type="button" data-iptv-view="cards" class="iptv-view-mode-btn px-2 py-1 rounded-lg text-[11px] font-medium text-slate-400 hover:text-white mac-transition">Cartões</button>
+            <button type="button" data-iptv-view="epg" class="iptv-view-mode-btn px-2 py-1 rounded-lg text-[11px] font-medium text-slate-400 hover:text-white mac-transition">Guia EPG</button>
+            <button type="button" data-iptv-view="theater" class="iptv-view-mode-btn px-2 py-1 rounded-lg text-[11px] font-medium text-slate-400 hover:text-white mac-transition">Teatro</button>
+          </div>
+
+          <button id="toggleIptvSignalPopoverBtn" type="button" class="px-2.5 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border mac-border text-[11px] font-medium flex items-center gap-1.5" title="Configurar Motor IPTV (Auto Remux / Proxy VLC / HLS / TS), Watchdog e Sleep Timer">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>Sinal</span>
+          </button>
+        </div>
+      </div>
+      <!-- Zapping Rápido (visível apenas quando tens canais favoritos) -->
+      <div id="iptvQuickFavsRowWrap" class="hidden items-center gap-2 overflow-x-auto whitespace-nowrap pt-1 border-t border-white/5">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-amber-400 shrink-0">★ Favoritos:</span>
+        <div id="iptvQuickFavsList" class="flex items-center gap-1.5"></div>
+      </div>
+    </div>
+
+    <!-- POPOVER FLUTUANTE: MOTOR IPTV (NATIVO / PROXY / REMUX), WATCHDOG & SLEEP TIMER -->
+    <div id="iptvSignalPopover" class="ms-signal-popover hidden space-y-3 text-xs">
+      <div class="flex items-center justify-between border-b mac-border pb-2">
+        <div class="flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="font-bold text-white">Motor de Sinal &amp; Auto-Cura</span>
+        </div>
+        <span id="engineBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Safari Nativo</span>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 mb-1">Motor de Descodificação IPTV:</label>
+        <select id="iptvEngineModeSelect" class="w-full bg-[#090d16] border mac-border rounded-xl px-2.5 py-1.5 text-xs font-semibold text-indigo-300 focus:outline-none cursor-pointer">
+          <option value="auto" selected>⚡ Auto Inteligente (Remux FFmpeg + Proxy VLC)</option>
+          <option value="remux">🔥 Remux FFmpeg H.264/AAC (Forçar .ts → MP4)</option>
+          <option value="proxy">🛡️ Proxy Local VLC Anti-CORS (.m3u8 / .ts)</option>
+          <option value="ts">📡 MPEG-TS Direto (mpegts.js)</option>
+          <option value="hlsjs">🌐 HLS.js Direto</option>
+          <option value="safari">🍎 Nativo HTML5</option>
+        </select>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div class="p-2 rounded-xl bg-[#090d16] border mac-border">
+          <p class="text-[10px] text-slate-400 uppercase">Buffer 1/2</p>
+          <p id="metricBuffer" class="text-xs font-mono font-semibold text-emerald-400 mt-0.5">0.0s</p>
+        </div>
+        <div class="p-2 rounded-xl bg-[#090d16] border mac-border">
+          <p class="text-[10px] text-slate-400 uppercase">Qualidade</p>
+          <p id="metricResolution" class="text-xs font-mono font-semibold text-indigo-400 mt-0.5">Auto HD</p>
+        </div>
+        <div class="p-2 rounded-xl bg-[#090d16] border mac-border">
+          <p class="text-[10px] text-slate-400 uppercase">Auto-Curas</p>
+          <p id="metricRetries" class="text-xs font-mono font-semibold text-amber-300 mt-0.5">0</p>
+        </div>
+      </div>
+
+      <div class="space-y-2 pt-1 border-t mac-border">
+        <div class="flex items-center justify-between">
+          <label for="autoReconnectToggle" class="text-slate-300 cursor-pointer">Watchdog: Destravar automaticamente</label>
+          <input id="autoReconnectToggle" type="checkbox" checked class="accent-indigo-500 w-4 h-4 rounded cursor-pointer" />
+        </div>
+        <div class="flex items-center justify-between">
+          <label for="autoFailoverVariantToggle" class="text-slate-300 cursor-pointer">Auto-Failover p/ Sinal Leve (SD/LOW)</label>
+          <input id="autoFailoverVariantToggle" type="checkbox" class="accent-emerald-500 w-4 h-4 rounded cursor-pointer" />
+        </div>
+        <div class="flex items-center justify-between">
+          <label for="macAirMultiViewOptToggle" class="text-slate-300 cursor-pointer">Otimizador Duplo Ecrã (MacBook Air)</label>
+          <input id="macAirMultiViewOptToggle" type="checkbox" checked class="accent-indigo-500 w-4 h-4 rounded cursor-pointer" />
+        </div>
+        <div class="flex items-center justify-between pt-1">
+          <label for="sleepTimerSelect" class="text-slate-400">Sleep Timer</label>
+          <select id="sleepTimerSelect" class="bg-[#090d16] border mac-border rounded-lg px-2 py-1 text-xs text-slate-200">
+            <option value="0">Desativado</option>
+            <option value="30">30 min</option>
+            <option value="60">60 min</option>
+            <option value="90">90 min (Fim do Jogo)</option>
+            <option value="120">2 horas</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- CORPO PRINCIPAL ZERO-SCROLL: PORTAIS (ESQUERDA) + EXPLORADOR CENTRAL (MEIO) + PALCO VÍDEO/EPG (DIREITA) -->
+    <div id="iptvBodyGrid" class="ms-iptv-body">
+
+      <!-- COLUNA 1: PORTAIS & PASTAS (OCULTA POR DEFEITO — ABRIR NO BOTÃO ☰ OU NO NOME DA PASTA) -->
+      <aside id="iptvSidebarPanel" class="hidden">
+        <div class="p-2 border-b mac-border bg-[#090d16]/90 flex items-center gap-1">
+          <select id="iptvCategorySelect" class="hidden">
+            <option value="ALL">Todas as Pastas</option>
+          </select>
+          <input id="iptvPortalSearchInput" type="text" placeholder="Filtrar pasta..." class="flex-1 min-w-0 bg-[#131825]/80 border mac-border rounded-lg px-2 py-1 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+          <button id="pinCurrentIptvCategoryBtn" type="button" class="hidden" title="Fixar pasta">📌</button>
+          <button id="refreshIptvPlaylistBtn" type="button" class="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white shrink-0 text-xs" title="Sincronizar novamente com o servidor Xtream">↻</button>
+        </div>
+
+        <!-- Lista interativa de Pastas/Portais -->
+        <div id="iptvWorkspacePortalsList" class="flex-1 overflow-y-auto divide-y divide-white/5"></div>
+
+        <!-- Rodapé discreto da Coluna de Portais -->
+        <div class="px-2.5 py-1.5 border-t mac-border bg-[#090d16] flex items-center justify-between text-[10px] text-slate-500">
+          <span class="truncate" id="iptvAccountStatusFooter">Auto-Cura</span>
+          <button id="exportM3uBtn" type="button" class="text-slate-400 hover:text-indigo-300 font-medium shrink-0" title="Exportar lista atual em ficheiro .M3U">.M3U</button>
+        </div>
+      </aside>
+
+      <!-- COLUNA 2: EXPLORADOR CENTRAL (TABELA WORKSPACE / GRELHA DE CARTÕES / GUIA EPG) -->
+      <section id="iptvCenterExplorerPane">
+        <div id="iptvRichExplorerSection" class="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <!-- Cabeçalho limpo da pasta ativa (clicável para abrir/fechar Países/Pastas) -->
+          <div class="px-3.5 py-2 border-b mac-border bg-[#0b0f19] flex items-center justify-between gap-2 shrink-0">
+            <button type="button" id="iptvHeaderFoldersTrigger" class="flex items-center gap-2 min-w-0 text-left hover:opacity-80 transition-opacity" title="Mostrar/Ocultar lista de Pastas e Países (S)">
+              <span class="text-slate-400 text-xs">☰</span>
+              <h3 id="iptvWorkspaceActivePortalLabel" class="text-xs font-bold text-white truncate">Todos os Canais</h3>
+              <span id="iptvRichExplorerCount" class="text-[10px] font-mono text-slate-400 shrink-0"></span>
+            </button>
+            <span class="text-[10px] text-slate-500 cursor-help shrink-0" title="Clique = 1.º Ecrã • Pílula [FHD/HD] = Mudar Sinal • 2.º Ecrã = Multiview">ⓘ</span>
+          </div>
+
+          <!-- Contentor 1: Lista/Tabela Workspace com Logos, Pílulas de Qualidade e EPG -->
+          <div id="iptvChannelListContainer" class="flex-1 overflow-y-auto divide-y divide-white/5"></div>
+          <div id="iptvWorkspaceChannelsTable" class="hidden"></div>
+          <div id="iptvWorkspaceSplitContainer" class="hidden"></div>
+
+          <!-- Contentor 2: Grelha Visual de Cartões (Estilo Apple TV / Zeus v1.2.9) -->
+          <div id="iptvCardsGridContainer" class="ms-iptv-cards-grid hidden"></div>
+
+          <!-- Contentor 3: Guia EPG Horizontal em Tempo Real -->
+          <div id="iptvEpgTimelineContainer" class="flex-1 overflow-y-auto divide-y divide-white/5 hidden"></div>
+
+          <!-- Botão Carregar Mais Canais -->
+          <div id="iptvLoadMoreWrapper" class="hidden p-2 border-t mac-border bg-[#0b0f19] text-center shrink-0">
+            <button id="iptvLoadMoreBtn" type="button" class="w-full py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-indigo-300 mac-transition">
+              Mostrar mais canais...
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- COLUNA 3: PALCO DE VÍDEO INTEGRADO + DUPLO ECRÃ + DETALHES EPG -->
+      <main id="iptvRightPlayerColumn">
+        <!-- VIDEO STAGE WRAPPER (SINGLE OR DUAL SCREEN MULTI-VIEW) -->
+        <div id="iptvVideoStageWrapper" class="relative w-full bg-black border-b mac-border shrink-0">
+          <div id="iptvPlayersGrid" class="grid grid-cols-1 gap-1 bg-black min-h-[340px] lg:min-h-[410px]">
+
+            <!-- PRIMARY IPTV PLAYER (ECRÃ 1) -->
+            <div class="relative w-full h-full flex items-center justify-center bg-black overflow-hidden">
+              <video
+                id="iptvPrimaryVideo"
+                class="w-full h-full max-h-[54vh] object-contain bg-black transition-transform duration-200"
+                playsinline
+                controls
+              ></video>
+
+              <!-- Top-Right Floating Channel OSD Badge (Ecrã 1) -->
+              <div class="absolute top-2.5 right-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-black/80 backdrop-blur-md border border-white/10 pointer-events-none z-10">
+                <span id="screen1HealthDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span id="osdChannelName" class="text-[11px] font-semibold text-white truncate max-w-[160px]">Seleciona um canal</span>
+                <span id="osdEngineTag" class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Nativo</span>
+              </div>
+
+              <!-- Auto-Healing Overlay Pill on Screen 1 -->
+              <div id="screen1HealBadge" class="hidden absolute bottom-12 left-3 px-3 py-1 rounded-xl bg-amber-500/95 text-slate-950 font-semibold text-[11px] shadow-lg flex items-center gap-2 z-20">
+                <span class="w-2 h-2 rounded-full bg-slate-950 animate-ping"></span>
+                <span id="screen1HealText">Auto-Cura Ecrã 1...</span>
+              </div>
+
+              <!-- Warning Banner if stream fails -->
+              <div id="safariBlockBanner" class="hidden absolute inset-3 p-3 rounded-xl bg-amber-950/95 border border-amber-500/50 text-amber-200 text-xs shadow-2xl z-20 flex flex-col justify-between">
+                <div class="space-y-1">
+                  <p class="font-bold text-white text-[11px]">⚠️ Sinal bloqueado ou indisponível no servidor</p>
+                  <p class="text-[10px] text-amber-200/90">Experimenta ativar o Proxy Anti-CORS, o Remux FFmpeg H.264/AAC ou trocar para um sinal alternativo:</p>
+                </div>
+                <div class="flex flex-wrap gap-1.5 pt-1">
+                  <button id="tryTsEngineBtn" type="button" class="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold">⚡ Tentar Remux / TS</button>
+                  <button id="switchScreen1LighterVariantBtn" type="button" class="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-semibold">🔀 Sinal Alternativo</button>
+                  <button id="dismissSafariBannerBtn" type="button" class="px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-[10px]">Fechar</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- SECONDARY IPTV PLAYER (ECRÃ 2 - DUPLO ECRÃ) -->
+            <div id="iptvSecondaryPlayerCard" class="hidden relative w-full h-full flex-col items-center justify-center bg-slate-950 border-t lg:border-t-0 lg:border-l mac-border overflow-hidden">
+              <video
+                id="iptvSecondaryVideo"
+                class="w-full h-full max-h-[54vh] object-contain bg-black"
+                playsinline
+                muted
+                controls
+              ></video>
+
+              <div class="absolute top-2 left-2 right-2 flex flex-wrap items-center justify-between gap-1 px-2 py-1 rounded-xl bg-black/80 border border-white/10 z-10">
+                <div class="flex items-center gap-1 min-w-0">
+                  <span id="screen2HealthDot" class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
+                  <span class="text-[11px] font-semibold text-indigo-300 truncate max-w-[95px]" id="secondaryChannelTitle">2.º Ecrã</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <select id="secondaryChannelSelect" class="bg-slate-900 border mac-border rounded-lg px-1.5 py-0.5 text-[10px] text-slate-100 max-w-[120px]">
+                    <option value="">2.º Canal...</option>
+                  </select>
+                  <button id="reloadSecondaryBtn" type="button" class="px-1.5 py-0.5 rounded bg-indigo-600/30 text-[10px] text-indigo-200" title="Recarregar 2.º Ecrã">↻</button>
+                  <button id="optimizeSecondaryVariantBtn" type="button" class="px-1.5 py-0.5 rounded bg-emerald-600/25 text-[10px] text-emerald-300" title="Sinal Leve">⚡</button>
+                  <button id="swapAudioSecondaryBtn" type="button" class="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-200" title="Alternar Áudio">🔇 Som 2</button>
+                </div>
+              </div>
+
+              <div id="screen2HealBadge" class="hidden absolute bottom-10 left-2 right-2 px-2.5 py-1 rounded-xl bg-amber-500/95 text-slate-950 font-semibold text-[10px] z-20">
+                <span id="screen2HealText">Auto-Cura Ecrã 2...</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- BARRA DISCRETA DE CONTROLOS DO PLAYER IPTV -->
+        <div class="px-3.5 py-2 bg-[#090d16] border-b mac-border flex flex-wrap items-center justify-between gap-1.5 text-[11px] shrink-0">
+          <div class="flex items-center gap-1">
+            <button id="iptvPrevChannelBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300" title="Canal Anterior">◀</button>
+            <button id="iptvNextChannelBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300" title="Próximo Canal">▶</button>
+            <button id="iptvFavCurrentBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 flex items-center gap-1" title="Favorito (L)">
+              <span id="iptvFavCurrentStar" class="text-amber-400">☆</span>
+              <span id="iptvFavCurrentLabel" class="hidden sm:inline">Favorito</span>
+            </button>
+            <button id="iptvReloadChannelBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300" title="Recarregar (R)">↻</button>
+            <button id="iptvSwitchBackupSignalBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300" title="Trocar Sinal (B)">🔀 Sinal</button>
+          </div>
+
+          <div class="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
+            <button id="iptvExpandTheaterBtn" type="button" class="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-indigo-600 text-slate-100 font-medium" title="Modo Teatro">Teatro</button>
+            <button id="iptvAspectRatioBtn" type="button" class="px-2 py-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white" title="Proporção">📐</button>
+            <button id="iptvImageBoostBtn" type="button" class="px-2 py-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white" title="Nitidez MacBook">✨</button>
+            <button id="iptvPipBtn" type="button" class="px-2 py-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white" title="Picture-in-Picture">PiP</button>
+            <button id="iptvFullscreenBtn" type="button" class="px-2 py-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white" title="Ecrã Inteiro (F)">⛶</button>
+          </div>
+        </div>
+
+        <!-- PAINEL INFERIOR DIREITO: SINAIS & GUIA EPG -->
+        <div id="iptvLowerEpgSection" class="p-3.5 space-y-2.5 flex-1">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <h2 id="iptvInfoChannelTitle" class="text-sm font-bold text-white truncate">Seleciona um canal</h2>
+              <span id="iptvInfoCategoryBadge" class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/5 text-slate-300">Direto</span>
+              <span id="iptvInfoStreamIdBadge" class="hidden">ID #--</span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0 opacity-60 hover:opacity-100 transition-opacity">
+              <button id="copyStreamUrlBtn" type="button" class="px-2 py-1 rounded-lg hover:bg-white/10 text-[10px] text-slate-300" title="Copiar URL do Stream">URL</button>
+              <button id="copyM3uPlaylistUrlBtn" type="button" class="px-2 py-1 rounded-lg hover:bg-white/10 text-[10px] text-slate-300" title="Copiar URL M3U">M3U</button>
+            </div>
+          </div>
+
+          <!-- Variantes Irmãs deste Canal (FHD / HD / H265 / LOW) -->
+          <div class="flex items-center gap-2 overflow-x-auto whitespace-nowrap">
+            <div id="siblingVariantsList" class="flex items-center gap-1.5"></div>
+          </div>
+
+          <!-- Guia EPG Agora & A Seguir -->
+          <div class="space-y-2.5">
+            <div class="p-3 rounded-xl bg-[#090d16] border mac-border">
+              <div class="flex items-center justify-between text-[10px] text-emerald-400 font-semibold mb-1">
+                <span>● EM EMISSÃO AGORA</span>
+                <span id="epgNowTime" class="font-mono text-slate-400">DIRETO</span>
+              </div>
+              <p id="epgNowTitle" class="text-xs font-bold text-slate-100 truncate">Emissão em Direto</p>
+              <p id="epgNowDesc" class="text-[11px] text-slate-400 mt-0.5 line-clamp-2">Guia sincronizado automaticamente.</p>
+              <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2">
+                <div id="epgProgressBar" class="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full" style="width: 35%;"></div>
+              </div>
+            </div>
+
+            <div class="p-2.5 rounded-xl bg-[#090d16]/70 border mac-border">
+              <div class="flex items-center justify-between text-[10px] text-indigo-400 font-semibold mb-0.5">
+                <span>⏭ A SEGUIR</span>
+                <span id="epgNextTime" class="font-mono text-slate-400">PRÓXIMO</span>
+              </div>
+              <p id="epgNextTitle" class="text-xs font-semibold text-slate-200 truncate">Programação Seguinte</p>
+              <p id="epgNextDesc" class="text-[10px] text-slate-400 mt-0.5 line-clamp-1">Transmissão contínua.</p>
+            </div>
+          </div>
+        </div>
+      </main>
+
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- STREMIO-STYLE DETAIL DRAWER & TORRENTIO STREAM SCRAPER MODAL              -->
+  <!-- ========================================================================= -->
+  <div id="detailModal" class="hidden fixed inset-0 z-40 mac-glass-heavy flex flex-col lg:flex-row overflow-hidden animate-fadeIn">
+    <!-- Top Floating Close Button -->
+    <button id="closeDetailModalBtn" type="button" class="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 border mac-border text-xs font-semibold flex items-center gap-1.5 shadow-xl mac-transition">
+      <span>✕ Fechar</span>
+      <kbd class="text-[10px] font-mono text-slate-400 bg-slate-800 px-1 rounded">ESC</kbd>
+    </button>
+
+    <!-- LEFT COLUMN: METADATA, SYNOPSIS & SEASONS/EPISODES (For Series) -->
+    <div class="w-full lg:w-7/12 xl:w-8/12 h-1/2 lg:h-full overflow-y-auto relative border-b lg:border-b-0 lg:border-r mac-border">
+      <!-- Backdrop Header -->
+      <div class="relative min-h-[240px] sm:min-h-[300px] p-6 flex items-end">
+        <img id="detailBackdrop" src="" alt="" class="absolute inset-0 w-full h-full object-cover opacity-30" />
+        <div class="absolute inset-0 bg-gradient-to-t from-[#0b0f19] via-[#0b0f19]/75 to-transparent"></div>
+
+        <div class="relative z-10 flex flex-col sm:flex-row items-start sm:items-end gap-5 w-full">
+          <img
+            id="detailPoster"
+            src=""
+            alt=""
+            class="w-24 sm:w-32 rounded-xl shadow-2xl border mac-border shrink-0 hidden sm:block object-cover aspect-[2/3]"
+          />
+          <div class="space-y-2 flex-1">
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <span id="detailTypeBadge" class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold uppercase text-[10px]">FILME</span>
+              <span id="detailImdbBadge" class="px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold">★ 8.5 IMDb</span>
+              <span id="detailYearRuntime" class="text-slate-300 font-medium">2024 • 140 min</span>
+              <span id="detailImdbIdTag" class="text-[11px] font-mono text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border mac-border">tt0000000</span>
+            </div>
+
+            <h2 id="detailTitle" class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Título</h2>
+            <p id="detailGenres" class="text-xs text-indigo-300 font-medium"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Synopsis & Actions -->
+      <div class="p-6 space-y-6">
+        <div class="flex flex-wrap items-center gap-2.5">
+
+          <button id="detailQuickPlayBtn" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 mac-transition flex items-center gap-2"><span id="detailQuickPlayText">⚡ Ver já</span></button>
+          <button id="detailResumeBtn" type="button" class="hidden px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 mac-transition items-center gap-2">
+            <span>▶ Retomar de 00:00</span>
+          </button>
+
+          <button id="detailToggleLibraryBtn" type="button" class="px-3.5 py-2 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border text-xs font-semibold mac-transition flex items-center gap-1.5">
+            <span id="detailLibIcon">＋</span>
+            <span id="detailLibText">Guardar na Biblioteca</span>
+          </button>
+
+          <button id="detailPreloadCacheBtn" type="button" class="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 text-xs font-semibold mac-transition flex items-center gap-1.5" title="Guardar episódio na pasta de Cache no disco">
+            <span>⚡</span>
+            <span id="detailPreloadCacheText">Guardar na Cache</span>
+          </button>
+
+          <button id="detailMarkWatchedBtn" type="button" class="px-3.5 py-2 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border text-xs font-semibold mac-transition flex items-center gap-1.5">
+            <span id="detailWatchedIcon">✓</span>
+            <span id="detailWatchedText">Marcar como Visto</span>
+          </button>
+        </div>
+
+        <div class="space-y-1.5">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Sinopse</h3>
+          <p id="detailPlot" class="text-xs sm:text-sm text-slate-200 leading-relaxed"></p>
+        </div>
+
+        <div id="detailCastWrapper" class="space-y-1.5">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Elenco &amp; Realização</h3>
+          <p id="detailCast" class="text-xs text-slate-300"></p>
+        </div>
+
+        <!-- SERIES SEASONS & EPISODES SELECTOR -->
+        <div id="seriesEpisodesContainer" class="hidden space-y-4 pt-2 border-t mac-border">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <span>📺 Temporadas e Episódios</span>
+              <span id="seriesActiveEpisodeLabel" class="text-xs font-mono text-indigo-400"></span>
+            </h3>
+            <div id="seasonTabsList" class="flex items-center gap-1.5 overflow-x-auto pb-1"></div>
+          </div>
+
+          <div id="episodesListContainer" class="space-y-2 max-h-[360px] overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN: TORRENTIO / STREMIO P2P STREAMS SCRAPER PANEL -->
+    <div class="w-full lg:w-5/12 xl:w-4/12 h-1/2 lg:h-full bg-[#131825]/95 flex flex-col">
+      <!-- Streams Header & Resolution Filter -->
+      <div class="p-4 border-b mac-border space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              <span>Fontes de Stream (Add-ons)</span>
+            </h3>
+            <p id="streamsSubtitleTarget" class="text-[11px] text-slate-400 mt-0.5">Ordenadas por Resolução, link direto e Seeders</p>
+          </div>
+          <span id="streamsTotalBadge" class="text-[11px] font-mono px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">0 streams</span>
+        </div>
+
+        <!-- Resolution Filter Tabs -->
+        <div class="flex items-center gap-1.5">
+          <button type="button" data-resfilter="ALL" class="res-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-indigo-600 text-white mac-transition">Todos</button>
+          <button type="button" data-resfilter="4K" class="res-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition">4K UHD</button>
+          <button type="button" data-resfilter="1080p" class="res-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition">1080p</button>
+          <button type="button" data-resfilter="720p" class="res-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition">720p</button>
+        </div>
+
+        <!-- Quick Custom Magnet Paste inside Stream Panel -->
+        <div class="flex items-center gap-1.5">
+          <input
+            id="inlineMagnetInput"
+            type="text"
+            placeholder="Colar Magnet Link ou URL direto (.mp4/.m3u8) para este título..."
+            class="flex-1 bg-[#0b0f19] border mac-border focus:border-indigo-500 rounded-xl px-3 py-1.5 text-[11px] font-mono text-slate-100 placeholder-slate-500 focus:outline-none"
+          />
+          <button id="inlineMagnetPlayBtn" type="button" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold shrink-0 mac-transition">
+            Abrir P2P
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable Streams List -->
+      <div id="streamsListContainer" class="flex-1 overflow-y-auto p-3.5 space-y-2.5"></div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- FULLSCREEN REAL-TIME P2P WEBTORRENT & NATIVE HTML5 VIDEO PLAYER OVERLAY   -->
+  <!-- ========================================================================= -->
+  <div id="playerModal" class="hidden fixed inset-0 z-50 bg-black flex flex-col justify-between select-none">
+
+    <!-- TOP PLAYER HUD: TITLE, REAL P2P SEQUENTIAL TELEMETRY & EPISODE NAVIGATION -->
+    <div id="playerTopHud" class="relative z-20 p-3 sm:px-5 bg-gradient-to-b from-black/95 via-black/80 to-transparent flex flex-wrap items-center justify-between gap-2 mac-transition border-b border-white/10">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <button id="closePlayerBtn" type="button" class="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10 mac-transition" title="Voltar ao Catálogo (ESC)">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div class="truncate max-w-[240px] sm:max-w-md">
+          <div class="flex items-center gap-2">
+            <h3 id="playerTitle" class="text-xs sm:text-sm font-bold text-white truncate">A reproduzir...</h3>
+            <span id="playerWatchedPill" class="hidden text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0">✓ Visto</span>
+          </div>
+          <p id="playerStreamSubtitle" class="text-[10px] font-mono text-indigo-300 truncate">⚡ P2P Sequencial • Download em Tempo Real enquanto assistes</p>
+        </div>
+      </div>
+
+      <!-- Center: Seletor de motor de reprodução (sem Python) -->
+      <div id="playModePills" class="flex items-center gap-1 bg-slate-900/95 p-1 rounded-xl border mac-border">
+        <button type="button" data-playmode="direct" class="play-mode-pill px-3 py-1 rounded-lg text-[11px] font-medium text-slate-300 hover:text-white mac-transition shrink-0" title="Link direto HTTP/HLS (Debrid ou add-on com URL direto) — a opção mais fiável">
+          ☁️ Link Direto
+        </button>
+        <button type="button" data-playmode="stremio" class="play-mode-pill px-3 py-1 rounded-lg text-[11px] font-medium text-slate-300 hover:text-white mac-transition shrink-0" title="Usa o servidor do Stremio Desktop (127.0.0.1:11470) se a app Stremio estiver aberta">
+          🖥️ Stremio Local
+        </button>
+        <button type="button" data-playmode="webtorrent" class="play-mode-pill px-3 py-1 rounded-lg text-[11px] font-medium text-slate-300 hover:text-white mac-transition shrink-0" title="WebTorrent no browser — apenas peers WebRTC">
+          🌐 WebTorrent
+        </button>
+      </div>
+
+      <!-- Right: Real P2P Telemetry + Episode Nav + Script Downloader -->
+      <div class="flex flex-wrap items-center gap-1.5 text-xs">
+        <div id="playerEpisodeNavGroup" class="hidden items-center gap-1 bg-slate-900/90 p-1 rounded-xl border mac-border">
+          <button id="playerPrevEpBtn" type="button" class="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/15 text-slate-200 text-[11px] font-semibold mac-transition" title="Episódio Anterior">
+            ⏮ Ant.
+          </button>
+          <button id="playerNextEpBtn" type="button" class="px-2 py-0.5 rounded-lg bg-indigo-600/40 hover:bg-indigo-600 text-indigo-200 hover:text-white text-[11px] font-semibold mac-transition" title="Saltar para o Próximo Episódio">
+            Próx. Ep ⏭
+          </button>
+          <button id="playerEpisodesBtn" type="button" class="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-100 text-[11px] font-semibold mac-transition" title="Escolher outro episódio (E)">
+            ☰ Episódios
+          </button>
+          <span id="playerPreloadStatusBadge" class="hidden px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 text-[10px] font-mono font-bold" title="O episódio seguinte é pré-carregado automaticamente aos 75%">⚡ Próx. 0ms</span>
+        </div>
+
+        <!-- 100% REAL P2P Telemetry Pill -->
+        <div class="px-2.5 py-1 rounded-xl bg-slate-900/90 border mac-border flex items-center gap-2 font-mono text-[11px]">
+          <span id="p2pStatusDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span id="p2pEngineModeBadge" class="text-indigo-300 font-semibold">P2P Sequencial</span>
+          <span class="text-slate-600">|</span>
+          <span id="p2pDownSpeed" class="text-emerald-400">↓ 0.00 MB/s</span>
+          <span class="text-slate-600">|</span>
+          <span id="p2pPeersCount" class="text-blue-300">👤 0 Peers</span>
+          <span class="text-slate-600 hidden sm:inline">|</span>
+          <span id="p2pBufferPct" class="text-amber-300 hidden sm:inline">0%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER VIDEO STAGE + P2P BUFFERING OVERLAY + LOCAL ENGINE SETUP HELPER -->
+    <div class="relative flex-1 flex items-center justify-center bg-black overflow-hidden" id="videoDropZone">
+      <video
+        id="cineVideoPlayer"
+        class="w-full h-full max-h-full object-contain bg-black"
+        playsinline
+        preload="auto"
+      ></video>
+
+      <!-- Center Seek / Action OSD Feedback Pill -->
+      <div id="playerCenterOsd" class="hidden absolute px-5 py-3 rounded-2xl bg-black/80 backdrop-blur-md border border-white/15 text-white font-bold text-sm shadow-2xl pointer-events-none z-30">
+        ▶ Play
+      </div>
+
+      <!-- P2P Sequential Buffering & Local Micro-Backend Helper Overlay -->
+      <div id="playerLoadingOverlay" class="hidden absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-20 p-5 text-center">
+        <div class="w-10 h-10 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
+        <div class="space-y-2 max-w-lg">
+          <p id="playerLoadingText" class="text-sm sm:text-base font-bold text-white">A iniciar download P2P sequencial do episódio...</p>
+          <p id="playerLoadingSub" class="text-xs font-mono text-slate-400">A ligar aos seeders e a preparar os primeiros pedaços do vídeo para reprodução imediata</p>
+          <div id="loadingQuickActions" class="pt-1 flex items-center justify-center gap-2">
+            <button id="loadingNextSourceBtn" type="button" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-indigo-600 text-slate-200 hover:text-white border border-white/15 text-xs font-semibold mac-transition">
+              ⏭ Trocar para outra fonte mais rápida
+            </button>
+          </div>
+        </div>
+
+        <!-- Box shown when Local Python P2P Engine (127.0.0.1:8888) is not yet running -->
+        <div id="localEngineMissingCard" class="hidden w-full max-w-xl p-4 rounded-2xl bg-[#131825] border border-amber-500/40 text-left space-y-3 shadow-2xl">
+          <p id="engineHelpText" class="text-xs text-slate-200 leading-relaxed"></p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="helpRetryBtn" type="button" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold mac-transition">↻ Tentar outra vez</button>
+            <button id="helpNextSourceBtn" type="button" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border mac-border text-xs font-semibold mac-transition">⏭ Outra fonte</button>
+            <button id="helpTryWebtorrentBtn" type="button" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold mac-transition">🌐 Tentar WebTorrent</button>
+            <button id="helpRetryStremioBtn" type="button" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border mac-border text-xs font-semibold mac-transition">🖥️ Tentar Stremio Local</button>
+            <button id="helpCompatBtn" type="button" class="hidden px-3.5 py-2 rounded-xl bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border border-amber-500/40 text-xs font-semibold mac-transition">🔊 Modo compatibilidade (converter áudio)</button>
+            <button id="helpOpenSettingsBtn" type="button" class="px-3.5 py-2 rounded-xl bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 text-xs font-semibold mac-transition">⚙️ Configurar Add-ons / Debrid</button>
+          </div>
+        </div>
+      </div>
+
+      <button id="skipIntroBtn" type="button" class="hidden absolute bottom-28 right-6 z-30 px-4 py-2 rounded-xl bg-white/90 hover:bg-white text-black text-xs font-bold shadow-xl">⏭ Saltar intro</button>
+      <div id="playerStallBox" class="hidden absolute bottom-28 left-1/2 z-30 px-4 py-2.5 rounded-xl bg-black/85 border border-white/15 text-xs text-white text-center space-y-1.5" style="transform:translateX(-50%)">
+        <p id="playerStallText"></p>
+        <button id="playerStallNextBtn" type="button" class="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold">⏭ Tentar outra fonte</button>
+      </div>
+
+      <!-- Subtle Non-Blocking Fast Seek Pill -->
+      <div id="playerFastSeekBadge" class="hidden">
+        <span class="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span>
+        <span id="playerFastSeekText">⚡ A saltar na cache…</span>
+      </div>
+
+      <!-- Painel: escolher qualquer episódio sem sair do player (FORA da zona drag do topo!) -->
+      <div id="playerEpisodesPanel" class="hidden absolute right-0 bottom-0 w-96 max-w-full bg-[#0b0f19] border-l border-white/15 flex flex-col" style="top:56px;z-index:60;-webkit-app-region:no-drag">
+        <div class="p-3 flex items-center justify-between gap-2 border-b border-white/10 bg-[#111726]" style="-webkit-app-region:no-drag">
+          <select id="playerEpSeasonSelect" class="flex-1 bg-slate-900 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white cursor-pointer focus:outline-none focus:border-indigo-500" style="-webkit-app-region:no-drag"></select>
+          <button id="playerEpCloseBtn" type="button" class="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-600 text-xs font-bold text-rose-200 hover:text-white border border-rose-500/30 cursor-pointer" style="-webkit-app-region:no-drag" title="Fechar lista de episódios (ESC)">✕ Fechar</button>
+        </div>
+        <div id="playerEpList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5" style="-webkit-app-region:no-drag"></div>
+      </div>
+
+      <!-- UP-NEXT EPISODE AUTOMATION FLOATING CARD (Triggers when <= 2 min remaining) -->
+      <div id="upNextEpisodeCard" class="hidden absolute bottom-24 right-6 z-30 w-80 p-4 rounded-2xl mac-glass-heavy border border-indigo-500/50 shadow-2xl space-y-2.5">
+        <div class="flex items-center justify-between text-[11px]">
+          <span class="font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+            <span>✓ Episódio Marcado como Visto</span>
+          </span>
+          <span id="upNextCountdownBadge" class="font-mono text-indigo-300">Auto em 10s</span>
+        </div>
+        <div>
+          <p class="text-[11px] text-slate-400">A seguir:</p>
+          <h4 id="upNextEpisodeTitle" class="text-sm font-bold text-white truncate">S01E02 — Próximo Episódio</h4>
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <button id="playNextEpisodeNowBtn" type="button" class="flex-1 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold mac-transition">
+            ▶ Reproduzir Seguinte
+          </button>
+          <button id="dismissUpNextBtn" type="button" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTTOM PLAYER CONTROLS BAR (Keyboard Shortcuts + Subtitles .SRT/.VTT + Timeline) -->
+    <div id="playerBottomHud" class="relative z-20 px-5 pt-3 pb-4 bg-gradient-to-t from-black/95 via-black/75 to-transparent space-y-2.5">
+      <!-- Interactive Timeline Scrubber -->
+      <div class="flex items-center gap-3 text-xs font-mono">
+        <span id="playerCurrentTime" class="text-slate-200 w-12 text-right">00:00</span>
+        <div id="playerSeekWrap" class="relative flex-1 h-5 flex items-center">
+          <div class="absolute inset-x-0 h-1.5 rounded-lg bg-slate-700/80 pointer-events-none"></div>
+          <div id="playerBufferBar" class="absolute left-0 h-1.5 rounded-lg bg-white/25 pointer-events-none" style="width:0"></div>
+          <div id="playerPlayedBar" class="absolute left-0 h-1.5 rounded-lg bg-indigo-500 pointer-events-none" style="width:0"></div>
+          <div id="playerCacheMapBar" title="Verde = Já guardado em Cache no disco | Laranja = A descarregar"></div>
+          <input id="playerSeekInput" type="range" min="0" max="1000" value="0" class="seek-range relative w-full" />
+          <div id="playerSeekTip" class="hidden absolute -top-8 px-2 py-0.5 rounded-md bg-black/95 border border-white/15 text-[11px] font-mono text-white pointer-events-none whitespace-nowrap" style="transform:translateX(-50%)">00:00</div>
+        </div>
+        <span id="playerDurationTime" class="text-slate-400 w-12">00:00</span>
+      </div>
+
+      <!-- Controls Row -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <!-- Left Controls: Play/Pause, -10s, +10s, Volume, Resume Indicator -->
+        <div class="flex items-center gap-2">
+          <button id="playerPlayPauseBtn" type="button" class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold mac-transition flex items-center gap-1.5" title="Reproduzir / Pausa (Espaço)">
+            <span id="playerPlayPauseIcon">⏸ Pausa</span>
+          </button>
+
+          <button id="playerRewindBtn" type="button" class="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-mono mac-transition" title="Recuar 10 segundos (Seta Esquerda)">
+            ⏪ -10s
+          </button>
+
+          <button id="playerForwardBtn" type="button" class="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-mono mac-transition" title="Avançar 10 segundos (Seta Direita)">
+            +10s ⏩
+          </button>
+
+          <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10">
+            <button id="playerMuteBtn" type="button" class="text-xs text-slate-200 hover:text-white" title="Silenciar (Tecla M)">🔊</button>
+            <input id="playerVolumeSlider" type="range" min="0" max="1" step="0.05" value="1" class="w-16 h-1" />
+          </div>
+
+          <span id="playerAutoSaveIndicator" class="text-[11px] font-mono text-slate-300 hidden lg:inline-flex items-center gap-2 ml-1 px-2 py-0.5 rounded-lg bg-white/5 border border-white/10" title="Significado das cores na barra de tempo">
+            <span>🟣 Visto</span>
+            <span>🟢 Em Cache no Disco</span>
+            <span>🟠 A receber</span>
+          </span>
+        </div>
+
+        <!-- Right Controls: Subtitles (.srt/.vtt), Speed, PiP, Fullscreen -->
+        <div class="flex flex-wrap items-center gap-2">
+          <div id="playerAudioWrap" class="hidden items-center gap-1 bg-white/10 border border-white/10 rounded-xl px-2.5 py-1">
+            <span class="text-[11px] text-slate-300">🎧</span>
+            <select id="playerAudioSelect" class="bg-transparent text-xs font-semibold text-indigo-300 focus:outline-none cursor-pointer max-w-[190px]"></select>
+          </div>
+          <!-- Subtitle Selector & Local .SRT/.VTT Loader -->
+          <div class="flex items-center gap-1 bg-white/10 border border-white/10 rounded-xl px-2.5 py-1">
+            <span class="text-[11px] text-slate-300">💬 Legendas:</span>
+            <select id="subtitleTrackSelect" class="bg-transparent text-xs font-semibold text-indigo-300 focus:outline-none cursor-pointer">
+                <option value="off" class="bg-slate-900">Sem legendas</option>
+              </select>
+              <span id="subCalibStatusBadge" class="hidden px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/35 text-[10px] font-mono text-emerald-300 whitespace-nowrap"></span>
+              <button id="subAutoCalibrateBtn" type="button" class="px-1.5 py-0.5 rounded bg-emerald-500/25 hover:bg-emerald-500/40 border border-emerald-500/35 text-[10px] font-semibold text-emerald-200" title="Detetar e calibrar automaticamente a legenda pelo áudio (Tecla A)">🎯 Auto</button>
+              <button id="subDelayMinusBtn" type="button" class="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-mono text-slate-200" title="Legenda mais cedo −0,5 s (tecla G)">−0,5s</button>
+              <button id="subDelayPlusBtn" type="button" class="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-mono text-slate-200" title="Legenda mais tarde +0,5 s (tecla H)">+0,5s</button>
+            <label for="customSrtFileInput" class="ml-1 px-1.5 py-0.5 rounded bg-indigo-500/30 hover:bg-indigo-500/50 text-[10px] font-semibold text-indigo-200 cursor-pointer transition" title="Carregar ficheiro .SRT ou .VTT do teu Mac (ou arrasta para o vídeo)">
+              + .SRT/.VTT
+            </label>
+            <input id="customSrtFileInput" type="file" accept=".srt,.vtt" class="hidden" />
+          </div>
+
+          <button id="playerFitBtn" type="button" class="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-medium mac-transition" title="Tamanho da imagem (Tecla Z)">
+            ⤢ Ampliar
+          </button>
+
+          <button id="playerPipBtn" type="button" class="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-medium mac-transition" title="Picture-in-Picture (Tecla P)">
+            ⧉ PiP
+          </button>
+
+          <button id="playerFullscreenBtn" type="button" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold mac-transition" title="Ecrã Inteiro (Tecla F)">
+            ⛶ Ecrã Inteiro (F)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 1: DIRECT MAGNET LINK / .TORRENT STREAMER                           -->
+  <!-- ========================================================================= -->
+  <div id="magnetModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="w-full max-w-lg rounded-2xl bg-[#131825] border mac-border shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b mac-border flex items-center justify-between">
+        <div>
+          <h3 class="text-base font-bold text-white">Motor Direto WebTorrent / Magnet Link</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Cola qualquer Magnet Link ou seleciona um ficheiro .torrent para fazer stream imediato</p>
+        </div>
+        <button id="closeMagnetModalBtn" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="p-5 space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1.5">Magnet URI ou URL direto (.mp4 / .m3u8 / .torrent)</label>
+          <textarea
+            id="directMagnetTextarea"
+            rows="3"
+            placeholder="magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel..."
+            class="w-full bg-[#0b0f19] border mac-border rounded-xl p-3 font-mono text-xs text-white focus:outline-none focus:border-indigo-500"
+          ></textarea>
+        </div>
+
+        <div class="flex items-center justify-between gap-2 p-3 rounded-xl bg-[#0b0f19]/80 border mac-border">
+          <div>
+            <p class="font-semibold text-slate-200">Testar Enxame WebTorrent P2P Real (Sintel HD)</p>
+            <p class="text-[11px] text-slate-400">Torrent público oficial com WebSeeds WebRTC ativos para teste imediato no browser</p>
+          </div>
+          <button id="fillSampleMagnetBtn" type="button" class="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 font-semibold shrink-0">
+            Preencher Teste P2P
+          </button>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1.5">Ou carregar ficheiro .torrent do teu MacBook</label>
+          <input id="torrentFileInput" type="file" accept=".torrent" class="w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer bg-[#0b0f19] border mac-border rounded-xl p-2" />
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button id="startDirectMagnetBtn" type="button" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-600/25 mac-transition">
+            ▶ Iniciar Streaming P2P Agora
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 1.5: XTREAM CODES SERVER LOGIN & .M3U PLAYLIST IMPORT               -->
+  <!-- ========================================================================= -->
+  <div id="xtreamModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="w-full max-w-lg rounded-2xl bg-[#131825] border mac-border shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b mac-border flex items-center justify-between">
+        <div>
+          <h3 class="text-base font-bold text-white">Servidor IPTV (Xtream Codes / Lista .M3U)</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Sincroniza Canais em Direto, Filmes VOD e Séries no teu MacBook Air</p>
+        </div>
+        <button id="closeXtreamModalBtn" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="px-5 pt-3 flex gap-3 border-b mac-border">
+        <button id="tabXtreamLoginBtn" type="button" class="pb-2.5 px-2 text-xs font-semibold border-b-2 border-indigo-500 text-indigo-400">
+          🔑 Servidor Xtream Codes
+        </button>
+        <button id="tabM3uImportBtn" type="button" class="pb-2.5 px-2 text-xs font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+          📄 Importar Ficheiro .M3U
+        </button>
+      </div>
+
+      <!-- Form Xtream -->
+      <form id="xtreamForm" class="p-5 space-y-3.5">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Nome do Perfil</label>
+          <input id="xtreamProfileName" type="text" value="Servidor Principal Mac" class="w-full bg-[#0b0f19] border mac-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">URL do Servidor (ex: http://servidor.com:8080)</label>
+          <input id="xtreamServerInput" type="text" placeholder="http://..." required class="w-full bg-[#0b0f19] border mac-border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Utilizador</label>
+            <input id="xtreamUserInput" type="text" required class="w-full bg-[#0b0f19] border mac-border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Password</label>
+            <input id="xtreamPassInput" type="password" required class="w-full bg-[#0b0f19] border mac-border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500" />
+          </div>
+        </div>
+
+        <div id="xtreamFeedbackBox" class="hidden p-3 rounded-xl text-xs"></div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="submit" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow-lg shadow-indigo-600/25 mac-transition">
+            Ligar e Sincronizar Tudo
+          </button>
+        </div>
+      </form>
+
+      <!-- Panel M3U -->
+      <div id="m3uImportPanel" class="hidden p-5 space-y-3.5">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Escolher ficheiro .M3U / .M3U8 do teu Mac</label>
+          <input id="m3uFileInput" type="file" accept=".m3u,.m3u8,.txt" class="w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer bg-[#0b0f19] border mac-border rounded-xl p-2" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Ou colar texto #EXTM3U</label>
+          <textarea id="m3uRawTextarea" rows="4" placeholder="#EXTM3U..." class="w-full bg-[#0b0f19] border mac-border rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"></textarea>
+        </div>
+        <div class="flex justify-end">
+          <button id="parseM3uBtn" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white">
+            Importar Lista M3U
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 2: TMDB API CONFIGURATION & STREMIO ADD-ONS MANAGER                 -->
+  <!-- ========================================================================= -->
+  <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="w-full max-w-xl rounded-2xl bg-[#131825] border mac-border shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b mac-border flex items-center justify-between">
+        <div>
+          <h3 class="text-base font-bold text-white">Add-ons Stremio, API TMDB &amp; Otimização MacBook Air</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Configura a tua chave TMDB opcional e gere os motores de scraping Torrentio</p>
+        </div>
+        <button id="closeSettingsModalBtn" type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="p-5 space-y-4 text-xs max-h-[80vh] overflow-y-auto">
+        <!-- TMDB API Key Box -->
+        <div class="p-4 rounded-xl bg-[#0b0f19] border mac-border space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-white flex items-center gap-1.5">
+              <span>🎬 Integração Direta TMDB API (v3)</span>
+            </span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Cinemeta + TMDB Hybrid</span>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            A aplicação já funciona sem configuração graças ao motor público Stremio Cinemeta. Se introduzires a tua chave gratuita da API <strong>TMDB (The Movie Database)</strong>, o catálogo passa a extrair sinopses em Português (`pt-PT`), capas 4K nativas e tendências diretamente do TMDB.
+          </p>
+          <div class="flex items-center gap-2">
+            <input
+              id="tmdbApiKeyInput"
+              type="text"
+              placeholder="Introduz a tua TMDB API Key (v3 auth) opcional..."
+              class="flex-1 bg-[#131825] border mac-border rounded-xl px-3 py-2 font-mono text-xs text-white focus:outline-none focus:border-indigo-500"
+            />
+            <button id="saveTmdbKeyBtn" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold mac-transition">
+              Guardar
+            </button>
+          </div>
+        </div>
+
+        <!-- Stremio / Torrentio Addons List + Priority Ordering + Live Ping Check -->
+        <div class="p-4 rounded-xl bg-[#0b0f19] border mac-border space-y-3">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <span class="font-bold text-white">🧩 Add-ons Instalados &amp; Prioridade</span>
+              <p class="text-[10px] text-slate-400">Ordena com ↑/↓ e testa a latência em tempo real</p>
+            </div>
+            <button id="pingAllAddonsBtn" type="button" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/35 text-[10px] font-bold">
+              ⚡ Testar Ligação (Ping ms)
+            </button>
+          </div>
+
+          <div id="addonsListContainer" class="space-y-2"></div>
+
+          <!-- Configurador Rápido Torrentio + Debrid (Estilo Zeus SDK + Debrid Integrado) -->
+          <div class="p-3 rounded-xl bg-[#131825] border mac-border space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-indigo-300">⚡ Configurador Rápido Torrentio &amp; Debrid</span>
+              <span class="text-[9px] font-mono text-slate-400">Gera manifesto oficial</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <select id="debridProviderSelect" class="bg-[#0b0f19] border mac-border rounded-lg px-2 py-1.5 text-[11px] text-slate-200">
+                <option value="none">Sem Debrid (P2P Direto)</option>
+                <option value="realdebrid">Real-Debrid (RD+)</option>
+                <option value="alldebrid">AllDebrid (AD+)</option>
+                <option value="premiumize">Premiumize (PM+)</option>
+                <option value="torbox">TorBox (TB+)</option>
+              </select>
+              <input id="debridApiKeyInput" type="password" placeholder="API Key Debrid (opcional)..." class="bg-[#0b0f19] border mac-border rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-white" />
+              <button id="applyTorrentioConfigBtn" type="button" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-[11px]">
+                Aplicar no Torrentio
+              </button>
+            </div>
+          </div>
+
+          <!-- Loja Integrada de Add-ons Stremio Verificados (1-Clique) -->
+          <div class="pt-1 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-200">🏪 Loja Curada de Add-ons Stremio (1-Clique)</span>
+              <span class="text-[10px] font-mono text-slate-400">Fontes P2P, Catálogos &amp; Legendas</span>
+            </div>
+            <div id="curatedAddonsStoreGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+          </div>
+
+          <!-- Custom Stremio Addon URL input -->
+          <div class="pt-2 flex items-center gap-2 border-t mac-border">
+            <input
+              id="customAddonUrlInput"
+              type="text"
+              placeholder="Ou colar URL de manifesto (https://.../manifest.json ou stremio://...)"
+              class="flex-1 bg-[#131825] border mac-border rounded-xl px-3 py-1.5 font-mono text-xs text-white focus:outline-none focus:border-indigo-500"
+            />
+            <button id="installAddonBtn" type="button" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 border mac-border font-semibold">
+              + Instalar
+            </button>
+          </div>
+        </div>
+
+        <!-- Backup 100% Privado em Disco Local (~/.macstream-cache/user-state.json) -->
+        <div class="p-4 rounded-xl bg-[#0b0f19] border border-emerald-500/30 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-white flex items-center gap-1.5">🔒 Privacidade 100% Local &amp; Espelho em Disco</span>
+            <span id="diskMirrorStatusBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ user-state.json Ativo</span>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            O teu histórico de séries, posição ao segundo, biblioteca e favoritos IPTV são espelhados automaticamente no disco do teu Mac (sem contas externas nem cloud). Podes também exportar ou restaurar um ficheiro `.json` a qualquer momento:
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="exportUserBackupBtn" type="button" class="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs mac-transition">
+              💾 Exportar Backup Local (.json)
+            </button>
+            <label class="px-3.5 py-1.5 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border font-semibold text-xs cursor-pointer mac-transition">
+              📂 Restaurar Backup (.json)
+              <input id="importUserBackupInput" type="file" accept=".json" class="hidden" />
+            </label>
+          </div>
+        </div>
+
+        <!-- MacBook Air 2019 Hardware Profile -->
+        <div class="p-4 rounded-xl bg-[#0b0f19] border mac-border flex items-center justify-between">
+          <div>
+            <p class="font-bold text-white">⚡ Modo Eco MacBook Air 2019 (Baixo Consumo CPU/RAM)</p>
+            <p class="text-[11px] text-slate-400">Limita conexões WebRTC simultâneas a 25 peers e desativa animações em segundo plano</p>
+          </div>
+          <input id="ecoModeToggle" type="checkbox" checked class="w-4 h-4 accent-indigo-500 rounded cursor-pointer" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toastBanner" class="hidden fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-xl mac-glass border border-indigo-500/40 text-xs font-semibold text-white shadow-2xl flex items-center gap-2">
+    <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+    <span id="toastMessage">Pronto</span>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- APPLICATION ARCHITECTURE (INDEXEDDB + TMDB/CINEMETA + TORRENTIO + PLAYER) -->
+  <!-- ========================================================================= -->
+  <script defer src="js/core.js"></script>
+  <script defer src="js/iptv.js"></script>
+  <script defer src="js/catalog.js"></script>
+  <script defer src="js/subtitles.js"></script>
+  <script defer src="js/player.js"></script>
+  <script defer src="js/events.js"></script>
+</body>
+</html>
