@@ -1234,6 +1234,16 @@
         const f = furthestWatched(imdbId);
         return !!f && epCmp(s, e, f.season || 1, f.episode || 1) < 0;
       }
+      function isSeriesFullyWatched(imdbId, mapArg) {
+        const map = mapArg || state.episodesCache[imdbId] || (state.cwMaps && state.cwMaps[imdbId]);
+        if (!map) return false;
+        const seasons = Object.keys(map).map(Number).filter(s => s > 0);
+        if (!seasons.length) return false;
+        return seasons.every(s => {
+          const eps = map[s] || [];
+          return eps.length > 0 && eps.every(e => isEpisodeWatched(imdbId, e.season || s, e.episode));
+        });
+      }
       function markEarlierEpisodesWatched(rec) {
         Object.values(state.watchProgressMap).forEach(r => {
           if (r.imdbId !== rec.imdbId || r.type !== 'series' || r.completed || r.manual === 'unwatched') return;

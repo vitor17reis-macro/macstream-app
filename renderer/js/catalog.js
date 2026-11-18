@@ -249,8 +249,11 @@
             }
             return;
           }
+          if (typeof isSeriesFullyWatched === 'function' && isSeriesFullyWatched(r.imdbId, map)) return;
           const next = computeAdjacentEpisode({ item: { imdbId: r.imdbId }, season: r.season, episode: r.episode }, 1, map);
-          if (next) cwList.push({ ...r, isNext: true, nextOf: r, season: next.season, episode: next.episode, episodeTitle: next.title, currentTime: 0, duration: 0 });
+          if (next && !isEpisodeWatched(r.imdbId, next.season, next.episode)) {
+            cwList.push({ ...r, isNext: true, nextOf: r, season: next.season, episode: next.episode, episodeTitle: next.title, currentTime: 0, duration: 0 });
+          }
         });
         const allProgress = cwList.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
@@ -1973,8 +1976,15 @@
           el.detailResumeBtn.classList.remove('flex');
         }
 
-        const isWatched = prog && prog.completed;
-        el.detailWatchedText.textContent = isWatched ? 'Marcado como Visto ✓' : 'Marcar como Visto';
+        if (item.type === 'series') {
+          const map = state.episodesCache[item.imdbId] || (state.cwMaps && state.cwMaps[item.imdbId]);
+          const seriesWatched = typeof isSeriesFullyWatched === 'function' && isSeriesFullyWatched(item.imdbId, map);
+          el.detailWatchedText.textContent = seriesWatched ? 'Série Toda Vista ✓' : 'Marcar Série Toda como Vista';
+          el.detailWatchedIcon.textContent = seriesWatched ? '✓' : '✓';
+        } else {
+          const isWatched = prog && prog.completed;
+          el.detailWatchedText.textContent = isWatched ? 'Marcado como Visto ✓' : 'Marcar como Visto';
+        }
 
         const qt = document.getElementById('detailQuickPlayText');
         if (qt) {

@@ -816,6 +816,39 @@
         el.detailMarkWatchedBtn.addEventListener('click', async () => {
           const item = state.selectedItem;
           if (!item) return;
+
+          if (item.type === 'series') {
+            const map = state.episodesCache[item.imdbId] || (typeof getSeriesEpisodesMap === 'function' ? await getSeriesEpisodesMap(item) : null);
+            const isFull = typeof isSeriesFullyWatched === 'function' && isSeriesFullyWatched(item.imdbId, map);
+            const targetVal = !isFull;
+
+            if (map) {
+              const seasons = Object.keys(map).map(Number).filter(s => s > 0);
+              for (const s of seasons) {
+                const eps = map[s] || [];
+                for (const ep of eps) {
+                  setEpisodeWatched(item, ep, targetVal, true);
+                }
+              }
+            } else {
+              const key = getProgressKey(item.imdbId, 'series', state.selectedSeason, state.selectedEpisode);
+              setEpisodeWatched(item, { season: state.selectedSeason, episode: state.selectedEpisode }, targetVal, true);
+            }
+
+            if (targetVal) {
+              Object.values(state.watchProgressMap).forEach(r => {
+                if (r && r.imdbId === item.imdbId) r.dismissed = true;
+              });
+            }
+
+            syncUserStateToDisk();
+            updateDetailButtonsState();
+            renderSeasonTabsAndEpisodes();
+            renderAllSections();
+            showToast(targetVal ? `Série "${item.title}" marcada como toda vista ✓` : `Série "${item.title}" desmarcada como vista`);
+            return;
+          }
+
           const key = getProgressKey(item.imdbId, item.type, state.selectedSeason, state.selectedEpisode);
           const current = state.watchProgressMap[key];
           const newCompleted = !(current && current.completed);
@@ -836,8 +869,8 @@
           };
           state.watchProgressMap[key] = rec;
           await CineDB.put('watch_progress', rec);
+          syncUserStateToDisk();
           updateDetailButtonsState();
-          if (item.type === 'series') renderSeasonTabsAndEpisodes();
           renderAllSections();
           showToast(newCompleted ? 'Marcado como Visto ✓' : 'Desmarcado como Visto');
         });
