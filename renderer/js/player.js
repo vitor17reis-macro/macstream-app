@@ -7,8 +7,11 @@
         clearTimeout(state.nativeSeekCheckTimer);
         clearTimeout(state.postSeekCalibTimer);
         clearTimeout(state.actOneCalibTimer);
+        clearTimeout(state.bufferStatusTimer);
         clearInterval(state.telemetryTimer);
         clearTimeout(state.p2pWatchdogTimer);
+        const fBadge = document.getElementById('playerFastSeekBadge');
+        if (fBadge) fBadge.classList.add('hidden');
         if (state.activeHls) {
           try { state.activeHls.destroy(); } catch (e) {}
           state.activeHls = null;
@@ -19,10 +22,31 @@
         }
         const v = el.cineVideoPlayer;
         v.onloadedmetadata = null;
+        v.onwaiting = null;
+        v.oncanplay = null;
+        v.onplaying = null;
         v.onerror = null;
         v.pause();
         v.removeAttribute('src');
         v.load();
+      }
+
+      function describePlayerWaitStatus() {
+        const ctx = state.playingContext || {};
+        const info = state.engineInfo || {};
+        const tel = state.lastTel || {};
+        const titleHint = `${info.name || ''} ${(ctx.stream && (ctx.stream.title || ctx.stream.audioTag)) || ''}`;
+        if (state.compat) {
+          if (/\b(eac3|ddp5?\.?1?|dd\+|ac-?3|dts|truehd|atmos)\b/i.test(titleHint)) {
+            return '🔊 A converter áudio EAC3/5.1 para AAC...';
+          }
+          return '🔄 A preparar vídeo (remux em tempo real)...';
+        }
+        if (tel.remuxing) return '⚡ A otimizar MP4 em cache...';
+        if ((tel.downloaded || 0) < 2 * 1024 * 1024 && !tel.remuxReady && !tel.ready) {
+          return '⏳ A aguardar início do ficheiro P2P...';
+        }
+        return '⏳ A carregar buffer de vídeo...';
       }
 
       function setSubCalibBadge(text, tone) {
@@ -252,13 +276,28 @@
         };
         v.onloadedmetadata = () => {
           if (token !== state.playToken) return;
-          hideBadge();
+          el.playerLoadingOverlay.classList.add('hidden');
+          if (v.readyState >= 3) {
+            if (badge) badge.classList.add('hidden');
+          } else if (badge && badgeTxt) {
+            badgeTxt.textContent = describePlayerWaitStatus();
+            badge.classList.remove('hidden');
+          }
           try { const sr = parseFloat(localStorage.getItem('macstream_rate')); if (sr > 0) { v.defaultPlaybackRate = sr; v.playbackRate = sr; } } catch (e) {}
           v.play().catch(() => {});
         };
         v.addEventListener('playing', hideBadge, { once: true });
         v.src = newUrl;
         v.load();
+        if (reqAt > 0) {
+          setTimeout(() => {
+            if (token !== state.playToken || v.readyState >= 2) return;
+            state.compatBaseSec = 0;
+            v.src = `${E}/transcode/${info.infoHash}/${info.fileIdx}?start=0&audio=${audioIdx}&_ts=${Date.now()}`;
+            v.load();
+            if (typeof showToast === 'function') showToast('A retomar do início para garantir reprodução estável.');
+          }, 6500);
+        }
       }
 
       function pbSeek(t) {
@@ -456,6 +495,11 @@
         document.getElementById('skipIntroBtn').classList.add('hidden');
         cleanupActivePlayerSession();
         clearInterval(state.home.heroTimer);
+        if (document.pictureInPictureElement === el.iptvPrimaryVideo) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+        destroyPrimaryIptvEngines();
+        destroySecondaryIptvEngines();
         state.playingContext = ctx;
         el.iptvPrimaryVideo.pause();
         el.iptvSecondaryVideo.pause();
@@ -497,6 +541,11 @@
           clearTimeout(state.slowTimer);
           el.playerLoadingOverlay.classList.add('hidden');
           el.localEngineMissingCard.classList.add('hidden');
+          if (v.readyState < 3) {
+            const b = document.getElementById('playerFastSeekBadge');
+            const bt = document.getElementById('playerFastSeekText');
+            if (b && bt) { bt.textContent = describePlayerWaitStatus(); b.classList.remove('hidden'); }
+          }
           try { const sr = parseFloat(localStorage.getItem('macstream_rate')); if (sr > 0) { v.defaultPlaybackRate = sr; v.playbackRate = sr; } } catch (e) {}
           if (resumeSeconds && resumeSeconds > 5) {
             const exact = Boolean(state.seekingExact);
@@ -507,6 +556,24 @@
           }
           v.play().catch(() => {});
         };
+        v.onwaiting = () => {
+          if (token !== state.playToken || v.paused) return;
+          clearTimeout(state.bufferStatusTimer);
+          state.bufferStatusTimer = setTimeout(() => {
+            if (token !== state.playToken || v.paused || v.readyState >= 3) return;
+            const b = document.getElementById('playerFastSeekBadge');
+            const bt = document.getElementById('playerFastSeekText');
+            if (b && bt) { bt.textContent = describePlayerWaitStatus(); b.classList.remove('hidden'); }
+          }, 650);
+        };
+        const hideWaitStatus = () => {
+          clearTimeout(state.bufferStatusTimer);
+          const b = document.getElementById('playerFastSeekBadge');
+          if (b) b.classList.add('hidden');
+          el.playerLoadingOverlay.classList.add('hidden');
+        };
+        v.oncanplay = hideWaitStatus;
+        v.onplaying = hideWaitStatus;
         clearTimeout(state.startTimer);
         clearTimeout(state.slowTimer);
         state.slowTimer = setTimeout(async () => {
@@ -619,7 +686,7 @@
               const dlMB = ((d.downloaded || 0) / (1024 * 1024)).toFixed(1);
               el.p2pDownSpeed.textContent = `↓ ${mbps} MB/s`;
               el.p2pPeersCount.textContent = `👤 ${d.numPeers || 0} ${(d.numPeers || 0) === 1 ? 'fonte' : 'fontes'}`;
-              state.lastTel = { mbps: parseFloat(mbps), peers: d.numPeers || 0, downloaded: d.downloaded || 0, ready: !!d.ready, remuxReady: !!d.remuxReady, mp4Url: d.mp4Url || null, pieceMap: d.pieceMap || [], progress: d.progress || 0, muxStartSec: d.muxStartSec, muxStartResolved: !!d.muxStartResolved };
+              state.lastTel = { mbps: parseFloat(mbps), peers: d.numPeers || 0, downloaded: d.downloaded || 0, ready: !!d.ready, remuxReady: !!d.remuxReady, remuxing: !!d.remuxing, mp4Url: d.mp4Url || null, pieceMap: d.pieceMap || [], progress: d.progress || 0, muxStartSec: d.muxStartSec, muxStartResolved: !!d.muxStartResolved };
               if (state.compat && d.muxStartResolved && typeof d.muxStartSec === 'number' && isFinite(d.muxStartSec)) {
                 const reqRef = state.compat.requestedOffset != null ? state.compat.requestedOffset : state.compat.offset;
                 if (Math.abs(d.muxStartSec - reqRef) < 18 && Math.abs(state.compat.offset - d.muxStartSec) >= 0.04) {
@@ -632,11 +699,14 @@
               el.p2pBufferPct.textContent = d.remuxReady ? `⚡ Cache 100%` : `💾 Cache ${pctVal}%`;
               el.ecoHudLabel.textContent = `↓ ${mbps} MB/s`;
               renderPlayerCacheMapBar(d.pieceMap);
-              if (!el.playerLoadingOverlay.classList.contains('hidden') && d.numPeers > 0) {
-                el.p2pStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
-                el.playerLoadingSub.textContent = d.ready
-                  ? `Ligado a ${d.numPeers} ${d.numPeers === 1 ? 'fonte' : 'fontes'} • ↓ ${mbps} MB/s (${dlMB} MB recebidos)`
-                  : `Ligado a ${d.numPeers} ${d.numPeers === 1 ? 'fonte' : 'fontes'} • a obter metadados via TCP/HTTPS...`;
+              if (!el.playerLoadingOverlay.classList.contains('hidden')) {
+                if (state.compat) el.playerLoadingText.textContent = describePlayerWaitStatus();
+                if (d.numPeers > 0) {
+                  el.p2pStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                  el.playerLoadingSub.textContent = d.ready
+                    ? `Ligado a ${d.numPeers} ${d.numPeers === 1 ? 'fonte' : 'fontes'} • ↓ ${mbps} MB/s (${dlMB} MB recebidos)`
+                    : `Ligado a ${d.numPeers} ${d.numPeers === 1 ? 'fonte' : 'fontes'} • a obter metadados via TCP/HTTPS...`;
+                }
               }
             } catch (e) {}
           };
@@ -701,10 +771,10 @@
             if (Number.isInteger(info.fileIdx)) stream.fileIdx = info.fileIdx;
             delete stream.torrentB64;
           }
-          // Ficheiros MKV/AVI/TS ou MP4 com áudio EAC3/DDP5.1/AC3/DTS usam diretamente o remuxer contínuo (-seekable 0, -c:v copy, -c:a aac)
-          // para arrancarem logo no segundo 0,0s sem reinício aos 2s nem dessincronização de legendas!
+          // Se já existir MP4 otimizado em cache (remuxReady), reproduz direto com seek 0ms; caso contrário usa remux contínuo para MKV/EAC3
           const audioHint = `${info.name || ''} ${(stream && stream.title) || ''} ${(stream && stream.audioTag) || ''}`;
-          if (mode === 'engine' && info && info.ffmpeg && (/\.(mkv|avi|ts|m2ts)$/i.test(info.name || '') || /\b(eac3|ddp5?\.?1?|dd\+|ac-?3|dts|truehd|atmos)\b/i.test(audioHint))) {
+          const hasReadyMp4 = Boolean(info && info.remuxReady && info.mp4Url && !(state.pendingAudio > 0));
+          if (mode === 'engine' && !hasReadyMp4 && info && info.ffmpeg && (/\.(mkv|avi|ts|m2ts)$/i.test(info.name || '') || /\b(eac3|ddp5?\.?1?|dd\+|ac-?3|dts|truehd|atmos)\b/i.test(audioHint))) {
             mode = 'compat';
             updatePlayModePillsUI('compat');
           }
@@ -744,7 +814,11 @@
             setTimeout(syncTracks, 1200);
             setTimeout(syncTracks, 3500);
           } else {
-            attachMediaSource(`${E}/stream/${info.infoHash}/${info.fileIdx}`, resumeSeconds, token);
+            if (hasReadyMp4) {
+              el.p2pEngineModeBadge.textContent = 'MP4 0ms';
+              el.playerStreamSubtitle.textContent = `⚡ Cache MP4 Pronto • ${(stream.title || '').slice(0, 70)}`;
+            }
+            attachMediaSource(hasReadyMp4 ? info.mp4Url : `${E}/stream/${info.infoHash}/${info.fileIdx}`, resumeSeconds, token);
             // Se o ficheiro MKV já descarregou > 4 MB mas o demuxer nativo do Chromium ficar à espera do fim do ficheiro, muda para o remuxer -seekable 0!
             setTimeout(() => {
               const v = el.cineVideoPlayer;

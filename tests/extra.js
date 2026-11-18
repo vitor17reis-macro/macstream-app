@@ -55,8 +55,22 @@ function get(port, p, headers) {
   });
 }
 
+function post(port, p, bodyObj) {
+  const b = JSON.stringify(bodyObj || {});
+  return new Promise((resolve, reject) => {
+    const r = http.request({
+      host: '127.0.0.1', port, path: p, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(b) }
+    }, (res) => {
+      let d = ''; res.on('data', x => (d += x)); res.on('end', () => resolve({ status: res.statusCode, body: d }));
+    });
+    r.on('error', reject);
+    r.end(b);
+  });
+}
+
 (async () => {
-  console.log('\n=== SUITE EXTRA: Segurança, Privacidade, P2P, Codecs & IPTV (43 Testes) ===');
+  console.log('\n=== SUITE EXTRA: Segurança, Privacidade, P2P, Codecs & IPTV (54 Testes) ===');
 
   const port = 25000 + Math.floor(Math.random() * 15000);
   const token = 'tok' + Math.random().toString(16).slice(2) + 'abcdef';
@@ -306,6 +320,114 @@ function get(port, p, headers) {
 
     await test('43. Código morto #simulateTwoMinLeftBtn removido de events.js e core.js', async () => {
       assert.ok(!eventsJs.includes('simulateTwoMinLeftBtn') && !coreJs.includes('simulateTwoMinLeftBtn'));
+    });
+
+    await test('44. Backups automáticos: POST /user-state cria snapshot diário e GET /backups lista-o', async () => {
+      const saveR = await post(port, `/${token}/user-state`, {
+        watchProgressMap: { tt0903747_S1_E1: { key: 'tt0903747_S1_E1', imdbId: 'tt0903747', completed: true, currentTime: 2900 } }
+      });
+      assert.strictEqual(saveR.status, 200);
+      const listR = await get(port, `/${token}/backups`);
+      assert.strictEqual(listR.status, 200);
+      const parsed = JSON.parse(listR.body);
+      assert.ok(parsed.ok && Array.isArray(parsed.files) && parsed.files.length >= 1, 'backup diário criado e listado');
+    });
+
+    await test('45. POST /backups/restore rejeita path traversal (400) e restaura backup válido (200)', async () => {
+      const bad = await post(port, `/${token}/backups/restore`, { name: '../user-state.json' });
+      assert.strictEqual(bad.status, 400);
+      const listR = JSON.parse((await get(port, `/${token}/backups`)).body);
+      const okR = await post(port, `/${token}/backups/restore`, { name: listR.files[0].name });
+      assert.strictEqual(okR.status, 200);
+      const okParsed = JSON.parse(okR.body);
+      assert.ok(okParsed.ok && okParsed.state.watchProgressMap.tt0903747_S1_E1.completed === true);
+    });
+
+    await test('46. POST /cache-remove/:hash/:idx delega em evictCacheEntry em engine.js', async () => {
+      assert.ok(engineJs.includes("if (parts[0] === 'cache-remove'") && engineJs.includes('evictCacheEntry(h, idx)'));
+      const bad = await post(port, `/${token}/cache-remove/invalido/0`, {});
+      assert.strictEqual(bad.status, 400);
+      const ok = await post(port, `/${token}/cache-remove/2222222222222222222222222222222222222222/0`, {});
+      assert.strictEqual(ok.status, 200);
+    });
+
+    await test('47. player.js usa info.mp4Url quando remuxReady e mostra estado de buffering em onwaiting', async () => {
+      assert.ok(playerJs.includes('hasReadyMp4 ? info.mp4Url'));
+      assert.ok(playerJs.includes('function describePlayerWaitStatus') && playerJs.includes('v.onwaiting ='));
+    });
+
+    await test('48. catalog.js inclui markCardEpisodeWatched e filtra séries terminadas em Série em Curso', async () => {
+      assert.ok(catalogJs.includes('async function markCardEpisodeWatched') && catalogJs.includes('.mark-watched-card-btn'));
+      assert.ok(catalogJs.includes('if (!next) continue;'));
+    });
+
+    await test('49. core.js e events.js implementam Auto-PiP IPTV, Zapping Recall (Z) e verificação de atualizações GitHub', async () => {
+      assert.ok(coreJs.includes('state.iptvAutoPip') && coreJs.includes('requestPictureInPicture()'));
+      assert.ok(eventsJs.includes('recallPreviousIptvChannel') && eventsJs.includes('checkForAppUpdates'));
+    });
+
+    await test('50. Gestor automático de espaço livre (< 10 GB) reduz cap em engine.js e reflete em /cache-info', async () => {
+      assert.ok(engineJs.includes('MIN_FREE_DISK_BYTES') && engineJs.includes('LOW_DISK_CACHE_LIMIT_BYTES'));
+      assert.ok(engineJs.includes('getDiskFreeBytes') && catalogJs.includes('SSD < 10 GB'));
+      process.env.MS_TEST_FREE_BYTES = String(5 * 1024 * 1024 * 1024);
+      try {
+        const res = await get(port, `/${token}/cache-info`);
+        assert.strictEqual(res.status, 200);
+        const info = JSON.parse(res.body);
+        assert.strictEqual(info.lowDiskSpace, true);
+        assert.strictEqual(info.diskFreeBytes, 5 * 1024 * 1024 * 1024);
+      } finally {
+        delete process.env.MS_TEST_FREE_BYTES;
+      }
+    });
+
+    await test('51. Endpoint POST /cache-remove-series valida imdbId e botão 🧹 Série existe em catalog.js', async () => {
+      assert.ok(engineJs.includes('evictCacheBySeries') && catalogJs.includes('cache-evict-series-btn'));
+      const postJson = (p, bodyObj) => new Promise((resolve, reject) => {
+        const data = JSON.stringify(bodyObj);
+        const req = http.request({
+          hostname: '127.0.0.1',
+          port,
+          path: `/${token}${p}`,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+        }, (res) => {
+          let buf = '';
+          res.on('data', (c) => { buf += c; });
+          res.on('end', () => resolve({ status: res.statusCode, body: buf }));
+        });
+        req.on('error', reject);
+        req.end(data);
+      });
+      const rOk = await postJson('/cache-remove-series', { imdbId: 'tt9999999' });
+      assert.strictEqual(rOk.status, 200);
+      assert.strictEqual(JSON.parse(rOk.body).ok, true);
+      const rBad = await postJson('/cache-remove-series', { imdbId: '' });
+      assert.strictEqual(rBad.status, 400);
+    });
+
+    await test('52. Overlay de Atalhos (⌘/ e botão ?) integrado em index.html, core.js e events.js', async () => {
+      const indexHtml = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+      assert.ok(indexHtml.includes('id="shortcutsModal"') && indexHtml.includes('id="openShortcutsModalBtn"'));
+      assert.ok(coreJs.includes('shortcutsModal:') && coreJs.includes('openShortcutsModalBtn:'));
+      assert.ok(eventsJs.includes('toggleShortcutsModal') && eventsJs.includes("ev.key === '/' || ev.key === '?'"));
+    });
+
+    await test('53. Filtro inteligente de Legendas PT (💬 Só PT e badges PT) em index.html, core.js, catalog.js e events.js', async () => {
+      const indexHtml = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+      assert.ok(indexHtml.includes('id="streamsPtSubFilterBtn"'));
+      assert.ok(coreJs.includes('streamsPtOnly: false') && coreJs.includes('streamsPtSubFilterBtn:'));
+      assert.ok(catalogJs.includes('fetchPtSubtitleHintsForSelection') && catalogJs.includes('annotateStreamsWithPtSubs') && catalogJs.includes('subPtLabel'));
+      assert.ok(eventsJs.includes('streamsPtSubFilterBtn'));
+    });
+
+    await test('54. Backup & Restauro 1-Clique na iCloud Drive com payload seguro em main.js, preload.js, core.js e events.js', async () => {
+      const preloadJs = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+      assert.ok(mainJs.includes("ipcMain.handle('icloud-export-backup'") && mainJs.includes("ipcMain.handle('icloud-restore-backup'"));
+      assert.ok(preloadJs.includes('icloudExportBackup') && preloadJs.includes('icloudRestoreBackup'));
+      assert.ok(coreJs.includes('function buildSafeExportPayload()') && coreJs.includes('async function applyImportedUserState(st)'));
+      assert.ok(eventsJs.includes('refreshICloudBackupStatus') && indexHtml.includes('id="icloudExportBtn"'));
     });
   } finally {
     eng.stop();

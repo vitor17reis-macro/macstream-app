@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('crypto');
 const zlib = require('zlib');
-const { app, BrowserWindow, session, shell, utilityProcess, screen, ipcMain, powerSaveBlocker, nativeImage, net, safeStorage } = require('electron');
+const { app, BrowserWindow, session, shell, utilityProcess, screen, ipcMain, powerSaveBlocker, nativeImage, net, safeStorage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -225,11 +225,130 @@ app.whenReady().then(() => {
   } catch (e) {}
   const engineToken = crypto.randomBytes(16).toString('hex');
   const episodeCacheDir = path.join(app.getPath('userData'), 'episode-cache');
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
   try { fs.mkdirSync(episodeCacheDir, { recursive: true }); } catch (e) {}
 
   ipcMain.on('engine-url', (e) => { e.returnValue = `http://127.0.0.1:11471/${engineToken}`; });
   ipcMain.on('app-version', (e) => { e.returnValue = app.getVersion(); });
   ipcMain.on('cache-dir', (e) => { e.returnValue = episodeCacheDir; });
+  ipcMain.handle('open-backups-folder', async () => {
+    try {
+      fs.mkdirSync(backupsDir, { recursive: true });
+      await shell.openPath(backupsDir);
+      return true;
+    } catch (e) { return false; }
+  });
+
+  const cloudCfgPath = path.join(app.getPath('userData'), 'cloud-backup-config.json');
+  function resolveCloudBackupDir() {
+    try {
+      if (fs.existsSync(cloudCfgPath)) {
+        const cfg = JSON.parse(fs.readFileSync(cloudCfgPath, 'utf8'));
+        if (cfg && typeof cfg.dir === 'string' && cfg.dir.trim()) {
+          return { available: true, isICloud: cfg.dir.includes('CloudDocs'), dir: cfg.dir.trim() };
+        }
+      }
+    } catch (e) {}
+    try {
+      const icloudRoot = path.join(app.getPath('home'), 'Library', 'Mobile Documents', 'com~apple~CloudDocs');
+      if (fs.existsSync(icloudRoot)) {
+        return { available: true, isICloud: true, dir: path.join(icloudRoot, 'MacStream Backups') };
+      }
+    } catch (e) {}
+    return { available: false, isICloud: false, dir: '' };
+  }
+  function findLatestCloudBackupFile(dir) {
+    if (!dir || !fs.existsSync(dir)) return null;
+    const latest = path.join(dir, 'macstream-backup-latest.json');
+    if (fs.existsSync(latest)) {
+      const st = fs.statSync(latest);
+      return { name: 'macstream-backup-latest.json', fullPath: latest, mtime: st.mtimeMs, size: st.size };
+    }
+    const dated = fs.readdirSync(dir)
+      .filter(n => /^macstream-backup-\d{4}-\d{2}-\d{2}\.json$/.test(n))
+      .sort()
+      .reverse();
+    if (dated.length) {
+      const fullPath = path.join(dir, dated[0]);
+      const st = fs.statSync(fullPath);
+      return { name: dated[0], fullPath, mtime: st.mtimeMs, size: st.size };
+    }
+    return null;
+  }
+  ipcMain.handle('icloud-backup-info', () => {
+    try {
+      const info = resolveCloudBackupDir();
+      const latest = info.dir ? findLatestCloudBackupFile(info.dir) : null;
+      return {
+        available: info.available,
+        isICloud: info.isICloud,
+        dir: info.dir,
+        latestFile: latest ? latest.name : null,
+        latestMtime: latest ? latest.mtime : 0
+      };
+    } catch (e) { return { available: false, isICloud: false, dir: '', latestFile: null, latestMtime: 0 }; }
+  });
+  ipcMain.handle('icloud-choose-folder', async () => {
+    try {
+      const info = resolveCloudBackupDir();
+      const defaultPath = info.dir && fs.existsSync(info.dir) ? info.dir : app.getPath('home');
+      const res = await dialog.showOpenDialog({
+        title: 'Escolher pasta para Backups (iCloud Drive / Cloud)',
+        defaultPath,
+        properties: ['openDirectory', 'createDirectory']
+      });
+      if (!res || res.canceled || !res.filePaths || !res.filePaths[0]) return { ok: false, canceled: true };
+      const dir = res.filePaths[0];
+      fs.writeFileSync(cloudCfgPath, JSON.stringify({ dir, updatedAt: Date.now() }, null, 2));
+      return { ok: true, dir };
+    } catch (e) { return { ok: false, error: e && e.message ? e.message : 'Erro ao escolher pasta.' }; }
+  });
+  ipcMain.handle('icloud-export-backup', (_ev, payload) => {
+    try {
+      const info = resolveCloudBackupDir();
+      if (!info.available || !info.dir) {
+        return { ok: false, error: 'iCloud Drive indisponível. Escolhe uma pasta primeiro.' };
+      }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return { ok: false, error: 'Dados de backup inválidos.' };
+      }
+      const clean = { ...payload };
+      delete clean.tmdbApiKey;
+      delete clean.debridProvider;
+      const serialized = JSON.stringify(clean, null, 2);
+      if (Buffer.byteLength(serialized) > 5 * 1024 * 1024) {
+        return { ok: false, error: 'Backup excede o limite de 5 MB.' };
+      }
+      fs.mkdirSync(info.dir, { recursive: true });
+      const latestPath = path.join(info.dir, 'macstream-backup-latest.json');
+      const dayName = `macstream-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const dayPath = path.join(info.dir, dayName);
+      for (const target of [latestPath, dayPath]) {
+        const tmp = target + '.tmp';
+        fs.writeFileSync(tmp, serialized);
+        fs.renameSync(tmp, target);
+      }
+      const dated = fs.readdirSync(info.dir).filter(n => /^macstream-backup-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort().reverse();
+      dated.slice(10).forEach(old => { try { fs.rmSync(path.join(info.dir, old), { force: true }); } catch (e) {} });
+      return { ok: true, dir: info.dir, fileName: dayName };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : 'Falha ao guardar no iCloud.' };
+    }
+  });
+  ipcMain.handle('icloud-restore-backup', () => {
+    try {
+      const info = resolveCloudBackupDir();
+      if (!info.dir) return { ok: false, error: 'Nenhuma pasta iCloud/Cloud configurada.' };
+      const latest = findLatestCloudBackupFile(info.dir);
+      if (!latest) return { ok: false, error: 'Nenhum backup encontrado na pasta iCloud.' };
+      if (latest.size > 5 * 1024 * 1024) return { ok: false, error: 'Ficheiro de backup demasiado grande.' };
+      const data = JSON.parse(fs.readFileSync(latest.fullPath, 'utf8'));
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false, error: 'Formato inválido.' };
+      return { ok: true, data, fileName: latest.name };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : 'Falha ao ler backup do iCloud.' };
+    }
+  });
 
   const spawnEngine = () => {
     if (isQuitting) return;

@@ -326,6 +326,29 @@
           else if (list.length > 0) playIptvChannelById(list[0].id);
         });
 
+        const recallPreviousIptvChannel = () => {
+          const prev = state.iptvHistory && state.iptvHistory[1];
+          if (prev && typeof playIptvChannelById === 'function') {
+            playIptvChannelById(prev);
+            showToast('↩ Canal anterior');
+          } else {
+            showToast('Sem canal anterior no histórico');
+          }
+        };
+        if (el.iptvRecallChannelBtn) {
+          el.iptvRecallChannelBtn.addEventListener('click', recallPreviousIptvChannel);
+        }
+        window.__msRecallIptv = recallPreviousIptvChannel;
+
+        if (el.iptvAutoPipToggle) {
+          el.iptvAutoPipToggle.checked = state.iptvAutoPip !== false;
+          el.iptvAutoPipToggle.addEventListener('change', () => {
+            state.iptvAutoPip = Boolean(el.iptvAutoPipToggle.checked);
+            try { localStorage.setItem('ms_iptv_auto_pip', state.iptvAutoPip ? '1' : '0'); } catch (e) {}
+            showToast(state.iptvAutoPip ? 'Mini-Player PiP automático ativado' : 'Mini-Player PiP desativado');
+          });
+        }
+
         el.iptvFavCurrentBtn.addEventListener('click', () => {
           if (state.iptvCurrentChannelId) toggleIptvFavorite(state.iptvCurrentChannelId);
         });
@@ -830,6 +853,16 @@
             renderScrapedStreamsList();
           });
         });
+        if (el.streamsPtSubFilterBtn) {
+          el.streamsPtSubFilterBtn.addEventListener('click', () => {
+            state.streamsPtOnly = !state.streamsPtOnly;
+            el.streamsPtSubFilterBtn.className = state.streamsPtOnly
+              ? 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600/90 text-white border border-emerald-400/50 mac-transition'
+              : 'px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition';
+            el.streamsPtSubFilterBtn.setAttribute('aria-pressed', state.streamsPtOnly ? 'true' : 'false');
+            renderScrapedStreamsList();
+          });
+        }
 
         // Inline Magnet Link Play inside Detail Drawer
         el.inlineMagnetPlayBtn.addEventListener('click', () => {
@@ -944,6 +977,7 @@
         el.helpOpenSettingsBtn.addEventListener('click', () => {
           el.tmdbApiKeyInput.value = state.tmdbApiKey;
           renderAddonsList();
+          if (typeof refreshAutoBackupsList === 'function') refreshAutoBackupsList();
           el.settingsModal.classList.remove('hidden');
         });
 
@@ -1074,14 +1108,170 @@
         });
 
         // Settings & TMDB Modal
+        async function refreshICloudBackupStatus() {
+          if (!el.icloudBackupStatusLabel) return;
+          if (!window.macstreamApp || typeof window.macstreamApp.icloudBackupInfo !== 'function') {
+            el.icloudBackupStatusLabel.textContent = 'Disponível apenas na app Desktop';
+            return;
+          }
+          try {
+            const info = await window.macstreamApp.icloudBackupInfo();
+            if (!info || !info.dir) {
+              el.icloudBackupStatusLabel.textContent = 'Pasta iCloud Drive não detetada — escolhe uma pasta manualmente.';
+              return;
+            }
+            const tag = info.isICloud ? '☁️ iCloud Drive ativo' : '📁 Pasta personalizada';
+            if (info.latestFile && info.latestMtime) {
+              const dt = new Date(info.latestMtime).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' });
+              el.icloudBackupStatusLabel.textContent = `${tag} • Último backup: ${dt}`;
+            } else {
+              el.icloudBackupStatusLabel.textContent = `${tag} • Ainda sem backups nesta pasta`;
+            }
+            el.icloudBackupStatusLabel.title = info.dir;
+          } catch (_) {
+            el.icloudBackupStatusLabel.textContent = 'Não foi possível verificar o backup na cloud.';
+          }
+        }
+
         el.openSettingsModalBtn.addEventListener('click', () => {
           el.tmdbApiKeyInput.value = state.tmdbApiKey;
           renderAddonsList();
+          if (el.settingsAppVersionLabel) {
+            const v = (window.macstreamApp && window.macstreamApp.version) || '3.0.0';
+            el.settingsAppVersionLabel.textContent = `v${String(v).replace(/^v/i, '')}`;
+          }
+          if (typeof refreshAutoBackupsList === 'function') refreshAutoBackupsList();
+          refreshICloudBackupStatus();
           el.settingsModal.classList.remove('hidden');
         });
+        if (el.restoreAutoBackupBtn) {
+          el.restoreAutoBackupBtn.addEventListener('click', async () => {
+            const name = el.autoBackupSelect && el.autoBackupSelect.value;
+            const E = window.macstreamApp && window.macstreamApp.engineUrl;
+            if (!E || !name) { showToast('Seleciona um backup automático primeiro.'); return; }
+            try {
+              const r = await fetch(`${E}/backups/restore`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+              });
+              const d = await r.json().catch(() => null);
+              if (!r.ok || !d || !d.ok || !d.state) { showToast('Não foi possível restaurar o backup.'); return; }
+              const st = d.state;
+              state.watchProgressMap = st.watchProgressMap || {};
+              state.libraryMap = st.libraryMap || {};
+              if (Array.isArray(st.iptvFavorites)) {
+                state.iptvFavorites = st.iptvFavorites;
+                storage.set('macstream_favs', state.iptvFavorites);
+              }
+              if (Array.isArray(st.iptvPinnedCategories)) {
+                state.iptvPinnedCategories = st.iptvPinnedCategories;
+                storage.set('ms_iptv_pinned_cats', state.iptvPinnedCategories);
+              }
+              for (const rec of Object.values(state.watchProgressMap)) {
+                if (rec && rec.key) await CineDB.put('watch_progress', rec).catch(() => {});
+              }
+              for (const it of Object.values(state.libraryMap)) {
+                if (it && it.imdbId) await CineDB.put('library', it).catch(() => {});
+              }
+              renderAllSections();
+              showToast(`✓ Backup ${name} restaurado!`);
+            } catch (e) { showToast('Erro ao restaurar backup automático.'); }
+          });
+        }
+        if (el.openBackupsFolderBtn) {
+          el.openBackupsFolderBtn.addEventListener('click', () => {
+            if (window.macstreamApp && typeof window.macstreamApp.openBackupsFolder === 'function') {
+              window.macstreamApp.openBackupsFolder();
+            }
+          });
+        }
+        if (el.icloudExportBtn) {
+          el.icloudExportBtn.addEventListener('click', async () => {
+            if (!window.macstreamApp || typeof window.macstreamApp.icloudExportBackup !== 'function') return;
+            el.icloudExportBtn.disabled = true;
+            try {
+              const payload = buildSafeExportPayload();
+              const res = await window.macstreamApp.icloudExportBackup(payload);
+              if (res && res.ok) {
+                await refreshICloudBackupStatus();
+                showToast(`☁️ Backup guardado em ${res.fileName || 'iCloud Drive'} ✓`);
+              } else {
+                showToast((res && res.error) || 'Não foi possível exportar para iCloud Drive.');
+              }
+            } catch (_) {
+              showToast('Erro ao exportar backup para iCloud Drive.');
+            } finally {
+              el.icloudExportBtn.disabled = false;
+            }
+          });
+        }
+        if (el.icloudRestoreBtn) {
+          el.icloudRestoreBtn.addEventListener('click', async () => {
+            if (!window.macstreamApp || typeof window.macstreamApp.icloudRestoreBackup !== 'function') return;
+            el.icloudRestoreBtn.disabled = true;
+            try {
+              const res = await window.macstreamApp.icloudRestoreBackup();
+              if (res && res.ok && res.data) {
+                await applyImportedUserState(res.data);
+                await refreshICloudBackupStatus();
+                showToast(`☁️ Backup ${res.fileName || 'iCloud'} restaurado ✓`);
+              } else {
+                showToast((res && res.error) || 'Nenhum backup encontrado na pasta iCloud/Cloud.');
+              }
+            } catch (_) {
+              showToast('Erro ao restaurar backup da iCloud.');
+            } finally {
+              el.icloudRestoreBtn.disabled = false;
+            }
+          });
+        }
+        if (el.icloudChooseDirBtn) {
+          el.icloudChooseDirBtn.addEventListener('click', async () => {
+            if (!window.macstreamApp || typeof window.macstreamApp.icloudChooseFolder !== 'function') return;
+            try {
+              const res = await window.macstreamApp.icloudChooseFolder();
+              if (res && res.ok && !res.canceled) {
+                await refreshICloudBackupStatus();
+                showToast('📁 Pasta de backups na Cloud selecionada ✓');
+              }
+            } catch (_) {
+              showToast('Erro ao selecionar pasta de backups.');
+            }
+          });
+        }
+        if (el.checkUpdatesBtn) {
+          el.checkUpdatesBtn.addEventListener('click', () => checkForAppUpdates(true));
+        }
+        const openReleasePage = () => {
+          if (state.latestReleaseUrl && /^https:\/\/github\.com\/vitor17reis-macro\/macstream-app\/releases\//i.test(state.latestReleaseUrl)) {
+            window.open(state.latestReleaseUrl, '_blank');
+          }
+        };
+        if (el.updateAvailableBtn) el.updateAvailableBtn.addEventListener('click', openReleasePage);
+        if (el.openUpdateReleaseBtn) el.openUpdateReleaseBtn.addEventListener('click', openReleasePage);
         el.closeSettingsModalBtn.addEventListener('click', () => {
           el.settingsModal.classList.add('hidden');
         });
+        function toggleShortcutsModal(forceClose = false) {
+          if (!el.shortcutsModal) return;
+          if (forceClose) {
+            el.shortcutsModal.classList.add('hidden');
+            return;
+          }
+          el.shortcutsModal.classList.toggle('hidden');
+        }
+        if (el.openShortcutsModalBtn) {
+          el.openShortcutsModalBtn.addEventListener('click', () => toggleShortcutsModal(false));
+        }
+        if (el.closeShortcutsModalBtn) {
+          el.closeShortcutsModalBtn.addEventListener('click', () => toggleShortcutsModal(true));
+        }
+        if (el.shortcutsModal) {
+          el.shortcutsModal.addEventListener('click', (ev) => {
+            if (ev.target === el.shortcutsModal) toggleShortcutsModal(true);
+          });
+        }
         el.saveTmdbKeyBtn.addEventListener('click', () => {
           state.tmdbApiKey = el.tmdbApiKeyInput.value.trim();
           writeSecret('macstream_tmdb_key', state.tmdbApiKey);
@@ -1128,7 +1318,18 @@
             return;
           }
 
+          // Cmd+/ or Ctrl+/ (or ?) for Keyboard Shortcuts Overlay
+          if ((ev.metaKey || ev.ctrlKey) && (ev.key === '/' || ev.key === '?')) {
+            ev.preventDefault();
+            toggleShortcutsModal();
+            return;
+          }
+
           if (ev.key === 'Escape') {
+            if (el.shortcutsModal && !el.shortcutsModal.classList.contains('hidden')) {
+              toggleShortcutsModal(true);
+              return;
+            }
             if (!el.playerModal.classList.contains('hidden')) {
               const epPanel = document.getElementById('playerEpisodesPanel');
               if (epPanel && !epPanel.classList.contains('hidden')) {
@@ -1153,10 +1354,9 @@
           // IPTV Mode Shortcuts when Cine Player Modal is closed
           if (state.appMode === 'iptv' && el.playerModal.classList.contains('hidden')) {
             const k = ev.key.toLowerCase();
-            if (ev.key === 'Backspace') {
+            if (ev.key === 'Backspace' || k === 'z') {
               ev.preventDefault();
-              const prev = state.iptvHistory && state.iptvHistory[1];
-              if (prev && typeof playIptvChannelById === 'function') { playIptvChannelById(prev); showToast('↩ Canal anterior'); }
+              if (typeof window.__msRecallIptv === 'function') window.__msRecallIptv();
             } else if (k === 's') {
               ev.preventDefault();
               el.toggleIptvSidebarBtn.click();
@@ -1455,17 +1655,100 @@
         if (state.selectedItem && !el.detailModal.classList.contains('hidden')) scrapeStreamsForCurrentSelection();
       }
 
+      function compareSemver(a, b) {
+        const pa = String(a || '').replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+        const pb = String(b || '').replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+        for (let i = 0; i < 3; i++) {
+          if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0) ? 1 : -1;
+        }
+        return 0;
+      }
+
+      async function refreshAutoBackupsList() {
+        const E = window.macstreamApp && window.macstreamApp.engineUrl;
+        if (!E || !el.autoBackupSelect) return;
+        try {
+          const r = await fetch(`${E}/backups`);
+          if (!r.ok) return;
+          const d = await r.json();
+          const files = Array.isArray(d && d.files) ? d.files : [];
+          el.autoBackupSelect.innerHTML = '';
+          if (!files.length) {
+            el.autoBackupSelect.innerHTML = '<option value="">Sem backups automáticos ainda</option>';
+            return;
+          }
+          files.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f.name;
+            const kb = Math.max(1, Math.round((f.size || 0) / 1024));
+            const day = f.name.replace(/^user-state-/, '').replace(/\.json$/, '');
+            opt.textContent = `${day} (${kb} KB)`;
+            el.autoBackupSelect.appendChild(opt);
+          });
+          const b1 = document.getElementById('diskMirrorStatusBadge');
+          if (b1 && files[0]) {
+            const lastDay = files[0].name.replace(/^user-state-/, '').replace(/\.json$/, '');
+            b1.textContent = `✓ Backup ${lastDay}`;
+          }
+        } catch (e) {}
+      }
+
+      async function checkForAppUpdates(manual = false) {
+        if (!manual && state.privateMode) return;
+        const curVer = String((window.macstreamApp && window.macstreamApp.version) || '3.0.0').replace(/^v/i, '');
+        if (el.settingsAppVersionLabel) el.settingsAppVersionLabel.textContent = `v${curVer}`;
+        if (manual && el.updateCheckStatusLabel) el.updateCheckStatusLabel.textContent = 'A verificar no GitHub Releases...';
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 6000);
+          const r = await fetch('https://api.github.com/repos/vitor17reis-macro/macstream-app/releases/latest', {
+            signal: ctrl.signal,
+            headers: { Accept: 'application/vnd.github+json' }
+          });
+          clearTimeout(timer);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const rel = await r.json();
+          const tag = String((rel && rel.tag_name) || '').trim();
+          const relUrl = String((rel && rel.html_url) || '');
+          const safeUrl = /^https:\/\/github\.com\/vitor17reis-macro\/macstream-app\/releases\//i.test(relUrl) ? relUrl : '';
+          if (tag && safeUrl && compareSemver(tag, curVer) > 0) {
+            state.latestReleaseUrl = safeUrl;
+            if (el.updateAvailableBtn) {
+              el.updateAvailableBtn.textContent = `⬆ ${tag}`;
+              el.updateAvailableBtn.classList.remove('hidden');
+              el.updateAvailableBtn.classList.add('flex');
+            }
+            if (el.openUpdateReleaseBtn) el.openUpdateReleaseBtn.classList.remove('hidden');
+            if (el.updateCheckStatusLabel) el.updateCheckStatusLabel.textContent = `Nova versão disponível: ${tag}`;
+            if (manual) showToast(`🚀 Nova versão ${tag} disponível no GitHub!`);
+          } else {
+            if (el.updateAvailableBtn) {
+              el.updateAvailableBtn.classList.add('hidden');
+              el.updateAvailableBtn.classList.remove('flex');
+            }
+            if (el.openUpdateReleaseBtn) el.openUpdateReleaseBtn.classList.add('hidden');
+            if (el.updateCheckStatusLabel) el.updateCheckStatusLabel.textContent = `✓ Tens a versão mais recente (v${curVer}).`;
+            if (manual) showToast(`✓ Já tens a versão mais recente (v${curVer}).`);
+          }
+        } catch (e) {
+          if (manual && el.updateCheckStatusLabel) {
+            el.updateCheckStatusLabel.textContent = 'Não foi possível verificar atualizações agora.';
+          }
+        }
+      }
+
       async function toggleLibraryItem(item) {
         if (state.libraryMap[item.imdbId]) {
           delete state.libraryMap[item.imdbId];
+          updateDockCounters();
           await CineDB.delete('library', item.imdbId);
           showToast(`"${item.title}" removido da Biblioteca`);
         } else {
           state.libraryMap[item.imdbId] = item;
+          updateDockCounters();
           await CineDB.put('library', item);
           showToast(`"${item.title}" guardado na Biblioteca ♥`);
         }
-        updateDockCounters();
         syncUserStateToDisk(false, true);
       }
 
@@ -1539,6 +1822,9 @@
         syncUserStateToDisk(true);
         syncCatalogFromApis(false);
         startIptvWatchdogLoop();
+        if (window.macstreamApp && window.macstreamApp.isApp && !state.privateMode) {
+          setTimeout(() => checkForAppUpdates(false), 6000);
+        }
       }
 
       if (document.readyState === 'loading') {

@@ -106,6 +106,8 @@ app.whenReady().then(async () => {
         const modalOpen = card ? !document.getElementById('detailModal').classList.contains('hidden') : false;
         const closeBtn = document.getElementById('closeDetailModalBtn');
         if (closeBtn && modalOpen) closeBtn.click();
+        inp.value = '';
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
         return { foundCard: !!card, modalOpen };
       })()
     `);
@@ -120,6 +122,7 @@ app.whenReady().then(async () => {
         const before = badge.classList.contains('hidden') ? 0 : (parseInt(badge.textContent, 10) || 0);
         const card = document.querySelector('#discoverGrid .poster-card, #moviesGrid .poster-card, .ms-poster-card');
         card.click();
+        await new Promise(r => setTimeout(r, 80));
         const libBtn = document.getElementById('detailToggleLibraryBtn');
         libBtn.click();
         await new Promise(r => setTimeout(r, 250));

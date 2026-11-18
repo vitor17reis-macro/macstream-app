@@ -179,6 +179,54 @@
         el.dockLibraryBadge.classList.toggle('hidden', libCount === 0);
       }
 
+      async function markCardEpisodeWatched(meta) {
+        if (!meta || !meta.imdbId) return;
+        const type = meta.type || 'movie';
+        const season = meta.season || 1;
+        const episode = meta.episode || 1;
+        const key = getProgressKey(meta.imdbId, type, season, episode);
+        const prev = state.watchProgressMap[key];
+        const rec = {
+          ...(prev || {}),
+          key,
+          imdbId: meta.imdbId,
+          title: meta.title || (prev && prev.title) || 'Título',
+          type,
+          poster: meta.poster || (prev && prev.poster) || '',
+          backdrop: meta.backdrop || (prev && prev.backdrop) || '',
+          season,
+          episode,
+          episodeTitle: meta.episodeTitle || (prev && prev.episodeTitle) || '',
+          currentTime: (prev && prev.duration > 0) ? prev.duration : 3600,
+          duration: (prev && prev.duration > 0) ? prev.duration : 3600,
+          completed: true,
+          dismissed: false,
+          updatedAt: Date.now()
+        };
+        state.watchProgressMap[key] = rec;
+        await CineDB.put('watch_progress', rec).catch(() => {});
+        syncUserStateToDisk();
+
+        const cacheEntry = findCacheEntryForItem(meta.imdbId, season, episode, meta.infoHash);
+        const h = ((cacheEntry && cacheEntry.infoHash) || meta.infoHash || '').toLowerCase();
+        const fIdx = Number.isInteger(cacheEntry && cacheEntry.fileIdx)
+          ? cacheEntry.fileIdx
+          : (Number.isInteger(meta.fileIdx) ? meta.fileIdx : 0);
+        const playing = state.playingContext && state.playingContext.stream;
+        const isPlayingThis = Boolean(playing && playing.infoHash && playing.infoHash.toLowerCase() === h && (playing.fileIdx || 0) === fIdx && !el.playerModal.classList.contains('hidden'));
+        const app = window.macstreamApp;
+        if (!isPlayingThis && app && app.engineUrl && /^[a-f0-9]{40}$/.test(h)) {
+          fetch(`${app.engineUrl}/cache-remove/${encodeURIComponent(h)}/${fIdx}`, { method: 'POST' })
+            .then(() => { if (typeof pollEpisodeCache === 'function') pollEpisodeCache(); })
+            .catch(() => {});
+        }
+
+        renderContinueWatchingRow();
+        renderEpisodeCacheSection();
+        renderCatalogGrid();
+        showToast(`✓ ${rec.title}${type === 'series' ? ` S${pad2(season)}E${pad2(episode)}` : ''} marcado como Visto`);
+      }
+
       function renderContinueWatchingRow() {
         const bySeries = {};
         const cwList = [];
@@ -243,6 +291,7 @@
               <div class="absolute top-2 left-2.5">
                 ${cInfo ? `<span class="px-1.5 py-0.5 rounded bg-emerald-500/90 text-slate-950 font-mono font-bold text-[10px]">⚡ ${cachePct}%</span>` : ''}
               </div>
+              <button type="button" class="mark-watched-card-btn opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-8 w-5 h-5 rounded-md bg-black/75 hover:bg-emerald-600 text-emerald-300 hover:text-white text-[10px] flex items-center justify-center" title="Marcar como Visto">✓</button>
               <button type="button" class="remove-progress-btn opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2 w-5 h-5 rounded-md bg-black/75 hover:bg-rose-600 text-slate-300 hover:text-white text-[10px] flex items-center justify-center" title="Remover de Continuar a Ver">✕</button>
             </div>
             <div class="p-2.5 space-y-1.5">
@@ -278,6 +327,22 @@
           card.addEventListener('click', async (ev) => {
             if (ev.target.closest('.ms-ep-quick-pop')) {
               ev.stopPropagation();
+              return;
+            }
+            if (ev.target.closest('.mark-watched-card-btn')) {
+              ev.stopPropagation();
+              await markCardEpisodeWatched({
+                imdbId: prog.imdbId,
+                type: prog.type,
+                title: prog.title,
+                poster: prog.poster,
+                backdrop: prog.backdrop,
+                season: sNum,
+                episode: eNum,
+                episodeTitle: prog.episodeTitle || '',
+                infoHash: prog.infoHash,
+                fileIdx: prog.fileIdx
+              });
               return;
             }
             if (ev.target.closest('.remove-progress-btn')) {
@@ -1117,13 +1182,15 @@
             const topG = prof.top.slice(0, 2).map(ptG).join(' e ');
             add(mkRow('Sugeridas para ti', `Com base no que viste: gostas de ${topG}`, recs.map(r => ({ item: r.it, badge: `🎯 ${matchPct(r.s)}% para ti` }))));
 
-            // 3) Porque viste X
+            // 3) Porque viste X (sem repetir os mesmos títulos entre filas)
+            const seenBecauseIds = new Set();
             prof.hist.slice(0, 2).forEach(h => {
               const hg = h.item.genres || [];
-              const sim = unseen.filter(it => it.type === h.item.type && it.imdbId !== h.item.imdbId)
+              const sim = unseen.filter(it => it.type === h.item.type && it.imdbId !== h.item.imdbId && !seenBecauseIds.has(it.imdbId))
                 .map(it => ({ it, n: (it.genres || []).filter(x => hg.includes(x)).length, r: parseFloat(it.rating) || 0 }))
                 .filter(x => x.n >= Math.min(2, hg.length || 1))
                 .sort((a, b) => (b.n - a.n) || (b.r - a.r)).map(x => x.it);
+              sim.slice(0, 14).forEach(it => seenBecauseIds.add(it.imdbId));
               add(mkRow(`Porque viste ${h.item.title}`, hg.slice(0, 3).map(ptG).join(' • '), sim));
             });
           } else {
@@ -1330,6 +1397,8 @@
               if (d && d.ok) {
                 state.episodeCacheItems = Array.isArray(d.items) ? d.items : [];
                 state.episodeCacheBytes = d.bytes || 0;
+                state.diskFreeBytes = d.diskFreeBytes;
+                state.lowDiskSpace = Boolean(d.lowDiskSpace);
               }
             }
           } catch (e) {}
@@ -1350,9 +1419,18 @@
         const items = state.episodeCacheItems || [];
         const mb = (state.episodeCacheBytes || 0) / (1024 * 1024);
         if (sizeBadge) {
-          sizeBadge.textContent = items.length
+          const sizeTxt = (items.length || mb >= 1)
             ? (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB no disco` : `${Math.max(1, Math.round(mb))} MB no disco`)
             : '0 MB no disco';
+          if (state.lowDiskSpace) {
+            sizeBadge.textContent = `⚠️ SSD < 10 GB • ${sizeTxt}`;
+            sizeBadge.className = 'text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/35';
+            sizeBadge.title = 'Espaço livre no disco abaixo de 10 GB: limite automático da cache reduzido para 4 GB / 2 episódios.';
+          } else {
+            sizeBadge.textContent = sizeTxt;
+            sizeBadge.className = 'text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/25';
+            sizeBadge.title = '';
+          }
         }
 
         grid.innerHTML = '';
@@ -1362,7 +1440,7 @@
           const pct = Math.min(100, Math.round((entry.progress || 0) * 100));
           const epTag = entry.season ? ` • S${pad2(entry.season)}E${pad2(entry.episode || 1)}` : '';
           const speedMB = ((entry.downloadSpeed || 0) / (1024 * 1024)).toFixed(2);
-          let statusLabel = entry.remuxReady ? '⚡ 100% MP4 Pronto (0ms)' : (pct >= 100 ? '✓ 100% em Disco' : (entry.paused ? `⏸ Em Pausa (${pct}%)` : `⬇ ${pct}% (${speedMB} MB/s)`));
+          let statusLabel = entry.remuxReady ? '⚡ 100% MP4 Pronto (0ms)' : (entry.remuxing ? '🔄 A otimizar MP4 (0ms)...' : (pct >= 100 ? '✓ 100% em Disco' : (entry.paused ? `⏸ Em Pausa (${pct}%)` : `⬇ ${pct}% (${speedMB} MB/s)`)));
           const pMap = Array.isArray(entry.pieceMap) && entry.pieceMap.length ? entry.pieceMap.slice(0, 32) : new Array(32).fill(pct >= 100 ? 1 : (pct / 100));
           const barsHtml = pMap.map(v => `<span style="flex:1;height:100%;background:${v >= 0.85 ? '#10b981' : (v > 0.1 ? '#f59e0b' : 'transparent')}"></span>`).join('');
 
@@ -1378,6 +1456,7 @@
                 <button type="button" class="cache-play-btn px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold">▶ Abrir</button>
                 ${pct < 100 ? `<button type="button" class="cache-toggle-dl-btn px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 text-[10px] font-semibold" title="Pausar ou Continuar transferência">${entry.paused ? '⬇' : '⏸'}</button>` : ''}
                 ${entry.season ? `<button type="button" class="cache-preload-next-btn px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-semibold" title="Pré-carregar episódio seguinte">⏭</button>` : ''}
+                ${entry.imdbId && entry.season ? `<button type="button" class="cache-evict-series-btn px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 text-[10px] font-semibold" title="Apagar todos os episódios em cache de ${esc(entry.title || 'esta série')} (mantém o histórico)">🧹 Série</button>` : ''}
                 <button type="button" class="cache-evict-btn px-1.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-[10px]" title="Apagar da cache">✕</button>
               </div>
             </div>
@@ -1425,6 +1504,27 @@
             });
           }
 
+          const sBtn = row.querySelector('.cache-evict-series-btn');
+          if (sBtn) {
+            sBtn.addEventListener('click', async () => {
+              const E = window.macstreamApp && window.macstreamApp.engineUrl;
+              if (E && entry.imdbId) {
+                await fetch(`${E}/cache-remove-series`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imdbId: entry.imdbId })
+                }).catch(() => {});
+              } else {
+                state.localCacheSim = (state.localCacheSim || []).filter(x => x.imdbId !== entry.imdbId);
+                storage.set('ms_local_cache_sim', state.localCacheSim);
+              }
+              showToast(`🧹 Cache de "${entry.title || 'série'}" limpa (histórico mantido).`);
+              pollEpisodeCache();
+              renderContinueWatchingRow();
+              if (typeof refreshCacheLabel === 'function') refreshCacheLabel();
+            });
+          }
+
           row.querySelector('.cache-evict-btn').addEventListener('click', async () => {
             const E = window.macstreamApp && window.macstreamApp.engineUrl;
             if (E) await fetch(`${E}/evict?hash=${entry.infoHash}&fileIdx=${entry.fileIdx || 0}`).catch(() => {});
@@ -1440,16 +1540,37 @@
           grid.appendChild(row);
         });
 
-        // 2. Preenche a Central de Séries com até 2 séries ativas do teu histórico (ex: The Office e Tulsa King)
+        // 2. Preenche a Central de Séries com até 2 séries ativas do teu histórico (excluindo séries terminadas)
         if (items.length < 2) {
           const cachedIds = new Set(items.map(x => x.imdbId).filter(Boolean));
           const bySeries = {};
           Object.values(state.watchProgressMap).forEach(r => {
-            if (!r || !r.imdbId || cachedIds.has(r.imdbId)) return;
+            if (!r || !r.imdbId || r.dismissed || cachedIds.has(r.imdbId)) return;
             const cur = bySeries[r.imdbId];
             if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) bySeries[r.imdbId] = r;
           });
-          let activeQueue = Object.values(bySeries).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 2 - items.length);
+          state.cwMaps = state.cwMaps || {};
+          const candidates = Object.values(bySeries).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          let activeQueue = [];
+          for (const r of candidates) {
+            if (activeQueue.length >= 2 - items.length) break;
+            const it = knownItem(r.imdbId) || { imdbId: r.imdbId, type: r.type || 'series', title: r.title, poster: r.poster, backdrop: r.backdrop };
+            if (r.completed && it.type === 'series') {
+              const map = state.episodesCache[r.imdbId] || state.cwMaps[r.imdbId];
+              if (!map) {
+                if (state.cwMaps[r.imdbId] === undefined) {
+                  state.cwMaps[r.imdbId] = null;
+                  getSeriesEpisodesMap(it).then(m => { state.cwMaps[r.imdbId] = m; renderEpisodeCacheSection(); }).catch(() => {});
+                }
+                continue;
+              }
+              const next = computeAdjacentEpisode({ item: it, season: r.season || 1, episode: r.episode || 1 }, 1, map);
+              if (!next) continue; // Série terminada no último episódio — não mostrar como em curso
+              activeQueue.push({ ...r, _nextEp: next });
+            } else if (!r.completed) {
+              activeQueue.push(r);
+            }
+          }
           if (activeQueue.length === 0) {
             const def1 = state.catalog.find(c => c.imdbId === 'tt0386676') || state.catalog[0];
             const def2 = state.catalog.find(c => c.imdbId === 'tt16358384') || state.catalog[1];
@@ -1461,11 +1582,11 @@
             const fallbackIt = knownItem(pickProg.imdbId) || { imdbId: pickProg.imdbId, type: pickProg.type || 'series', title: pickProg.title, poster: pickProg.poster, backdrop: pickProg.backdrop };
             let sNum = pickProg.season || 1;
             let eNum = pickProg.episode || 1;
-            let epSub = '';
-            if (pickProg.completed && fallbackIt.type === 'series') {
-              const map = state.episodesCache[pickProg.imdbId] || (state.cwMaps && state.cwMaps[pickProg.imdbId]);
-              const next = map ? computeAdjacentEpisode({ item: fallbackIt, season: sNum, episode: eNum }, 1, map) : { season: sNum, episode: eNum + 1, title: '' };
-              if (next) { sNum = next.season; eNum = next.episode; epSub = next.title || ''; }
+            let epSub = pickProg.episodeTitle || '';
+            if (pickProg._nextEp) {
+              sNum = pickProg._nextEp.season;
+              eNum = pickProg._nextEp.episode;
+              epSub = pickProg._nextEp.title || '';
             }
             const tagTxt = pickProg.isSuggestion
               ? `⚡ Pré-carrega S${pad2(sNum)}E${pad2(eNum)} no disco`
@@ -1487,6 +1608,7 @@
               <div class="flex items-center gap-1 shrink-0">
                 <button type="button" class="dash-up-play px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold">▶ Ver</button>
                 <button type="button" class="dash-up-cache px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/35 text-[10px] font-bold" title="Guardar episódio no disco para arranque em 0ms">⚡ Cache</button>
+                ${!pickProg.isSuggestion ? `<button type="button" class="dash-up-watched px-2 py-1 rounded-lg bg-white/5 hover:bg-emerald-600 text-emerald-300 hover:text-white border mac-border text-[10px] font-bold" title="Marcar S${pad2(sNum)}E${pad2(eNum)} como Visto">✓</button>` : ''}
               </div>
             `;
             upRow.querySelector('.dash-up-play').addEventListener('click', () => {
@@ -1496,6 +1618,23 @@
             upRow.querySelector('.dash-up-cache').addEventListener('click', () => {
               preloadItemToCache(fallbackIt, sNum, eNum, epSub);
             });
+            const wBtn = upRow.querySelector('.dash-up-watched');
+            if (wBtn) {
+              wBtn.addEventListener('click', () => {
+                markCardEpisodeWatched({
+                  imdbId: fallbackIt.imdbId,
+                  type: fallbackIt.type || 'series',
+                  title: fallbackIt.title,
+                  poster: fallbackIt.poster,
+                  backdrop: fallbackIt.backdrop,
+                  season: sNum,
+                  episode: eNum,
+                  episodeTitle: epSub,
+                  infoHash: pickProg.infoHash,
+                  fileIdx: pickProg.fileIdx
+                });
+              });
+            }
             grid.appendChild(upRow);
           });
         }
@@ -2183,6 +2322,95 @@
         });
       }
 
+      async function fetchPtSubtitleHintsForSelection(item, season, episode) {
+        const empty = { hasPtPt: false, hasPtBr: false, ptCount: 0, releaseTags: new Set(), groupTokens: new Set() };
+        if (!item || !item.imdbId || !item.imdbId.startsWith('tt')) return empty;
+        const vid = item.type === 'series' ? `${item.imdbId}:${season || 1}:${episode || 1}` : item.imdbId;
+        const E = window.macstreamApp && window.macstreamApp.engineUrl;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4500);
+        try {
+          const stremioReq = fetch(`${OPENSUBS_URL}/subtitles/${item.type}/${vid}.json`, { signal: ctrl.signal })
+            .then(r => (r.ok ? r.json() : null)).catch(() => null);
+          const restReq = E
+            ? (() => {
+                const q = new URLSearchParams({ imdbId: item.imdbId });
+                if (item.type === 'series') { q.set('season', String(season || 1)); q.set('episode', String(episode || 1)); }
+                return fetch(`${E}/opensubs?${q.toString()}`, { signal: ctrl.signal }).then(r => (r.ok ? r.json() : null)).catch(() => null);
+              })()
+            : Promise.resolve(null);
+          const [d1, d2] = await Promise.all([stremioReq, restReq]);
+          const allSubs = [
+            ...((d1 && Array.isArray(d1.subtitles)) ? d1.subtitles : []),
+            ...((d2 && d2.ok && Array.isArray(d2.subtitles)) ? d2.subtitles : [])
+          ];
+          const ptSubs = allSubs.filter(s => {
+            const lang = String((s && (s.lang || s.SubLanguageID || s.LanguageName)) || '').toLowerCase();
+            return /^(por|pt|pt-pt|portuguese|pob|pb|pt-br|brazilian)$/.test(lang) || /portugu/i.test(lang);
+          });
+          if (!ptSubs.length) return empty;
+          let hasPtPt = false;
+          let hasPtBr = false;
+          const releaseTags = new Set();
+          const groupTokens = new Set();
+          ptSubs.forEach(s => {
+            const lang = String((s && (s.lang || s.SubLanguageID || s.LanguageName)) || '').toLowerCase();
+            if (/^(pob|pb|pt-br|brazilian)$/.test(lang) || /brazil/i.test(lang)) hasPtBr = true;
+            else hasPtPt = true;
+            const meta = String((s && (s.SubFileName || s.MovieReleaseName || s.title || s.name)) || '');
+            if (meta) {
+              const rTag = typeof ssExtractReleaseTag === 'function' ? ssExtractReleaseTag(meta) : '';
+              if (rTag) releaseTags.add(rTag.toLowerCase());
+              const grpM = /-([a-z0-9]{2,12})(?:\.(?:srt|vtt|sub|gz))?$/i.exec(meta.trim());
+              if (grpM && grpM[1]) groupTokens.add(grpM[1].toLowerCase());
+              const platM = /\b(AMZN|NF|ATVP|HMAX|DSNP|PMTP|WEB[-_.]?DL|WEBRIP|BLURAY)\b/ig;
+              let pm;
+              while ((pm = platM.exec(meta))) groupTokens.add(pm[1].toLowerCase().replace(/[-_.]/g, ''));
+            }
+          });
+          return { hasPtPt, hasPtBr, ptCount: ptSubs.length, releaseTags, groupTokens };
+        } catch (e) {
+          return empty;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      function annotateStreamsWithPtSubs(streams, ptHints) {
+        const hints = ptHints || { hasPtPt: false, hasPtBr: false, ptCount: 0, releaseTags: new Set(), groupTokens: new Set() };
+        const hasAnyPt = Boolean(hints.hasPtPt || hints.hasPtBr);
+        return (streams || []).map(st => {
+          if (!st || st.isTest) return st;
+          const titleRaw = `${st.title || ''} ${st.filename || ''}`;
+          const explicitPt = /\b(pt[-_ ]?pt|pt[-_ ]?br|portuguese|portugu[eê]s|multi[-_ ]?subs?)\b|🇵🇹|🇧🇷/i.test(titleRaw);
+          let relMatch = false;
+          if (!explicitPt && (hints.releaseTags.size || hints.groupTokens.size)) {
+            const rTag = (typeof ssExtractReleaseTag === 'function' ? ssExtractReleaseTag(titleRaw) : '').toLowerCase();
+            if (rTag && hints.releaseTags.has(rTag)) relMatch = true;
+            if (!relMatch) {
+              const norm = titleRaw.toLowerCase();
+              for (const tok of hints.groupTokens) {
+                if (tok.length >= 3 && new RegExp(`(?:^|[^a-z0-9])${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`, 'i').test(norm)) {
+                  relMatch = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (explicitPt || relMatch) {
+            st.subPtMatch = 'exact';
+            st.subPtLabel = hints.hasPtPt || /\bpt[-_ ]?pt\b|🇵🇹/i.test(titleRaw) ? '💬 PT Match' : '💬 PT-BR Match';
+          } else if (hasAnyPt) {
+            st.subPtMatch = 'avail';
+            st.subPtLabel = hints.hasPtPt ? '💬 PT-PT' : '💬 PT-BR';
+          } else {
+            st.subPtMatch = 'none';
+            st.subPtLabel = '';
+          }
+          return st;
+        });
+      }
+
       async function scrapeStreamsForCurrentSelection() {
         const item = state.selectedItem;
         if (!item) return;
@@ -2198,17 +2426,22 @@
         el.streamsListContainer.innerHTML = `
           <div class="p-8 text-center space-y-2">
             <div class="w-7 h-7 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin mx-auto"></div>
-            <p class="text-xs text-slate-300 font-medium">A consultar os teus add-ons Stremio...</p>
+            <p class="text-xs text-slate-300 font-medium">A consultar os teus add-ons Stremio e legendas PT...</p>
           </div>
         `;
 
-        const collected = await fetchStreamsFor(item, reqSeason, reqEpisode);
+        const [collected, ptHints] = await Promise.all([
+          fetchStreamsFor(item, reqSeason, reqEpisode),
+          fetchPtSubtitleHintsForSelection(item, reqSeason, reqEpisode)
+        ]);
         if (myToken !== state.scrapeToken) return;
 
+        annotateStreamsWithPtSubs(collected, ptHints);
         state.scrapedStreams = [...collected];
         state.scrapedStreamsKey = getContextStreamsKey(item, reqSeason, reqEpisode);
+        const subSuffix = ptHints.hasPtPt ? ' • 💬 PT-PT disponível' : (ptHints.hasPtBr ? ' • 💬 PT-BR disponível' : '');
         el.streamsSubtitleTarget.textContent = collected.length
-          ? `${targetLabel} — ordenadas por velocidade e seeders ativos`
+          ? `${targetLabel} — ordenadas por velocidade e seeders${subSuffix}`
           : `${targetLabel} — nenhuma fonte devolvida pelos add-ons ativos`;
         renderScrapedStreamsList();
 
@@ -2284,9 +2517,14 @@
         const topSet = new Set(top);
         const rest = (state.scrapedStreams || []).filter(s => !s.isTest && !topSet.has(s));
         const combined = [...top, ...rest];
-        const filtered = state.activeResFilter === 'ALL'
+        let filtered = state.activeResFilter === 'ALL'
           ? combined
           : combined.filter(s => s.resolution.toUpperCase() === state.activeResFilter.toUpperCase());
+        if (state.streamsPtOnly) {
+          filtered = filtered
+            .filter(s => s.subPtMatch === 'exact' || s.subPtMatch === 'avail')
+            .sort((a, b) => (a.subPtMatch === 'exact' ? 0 : 1) - (b.subPtMatch === 'exact' ? 0 : 1));
+        }
 
         el.streamsTotalBadge.textContent = `${filtered.filter(s => !s.isTest).length} streams`;
         el.streamsListContainer.innerHTML = '';
@@ -2319,6 +2557,7 @@
                 ${st._tag ? `<span class="px-1.5 py-0.5 rounded bg-indigo-500/25 text-indigo-200 text-[10px] font-semibold">${esc(st._tag)}</span>` : ''}
                 ${st.hdr ? `<span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-semibold">${esc(st.hdr)}</span>` : ''}
                 ${st.codec ? `<span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-mono">${esc(st.codec)}</span>` : ''}
+                ${st.subPtLabel ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border ${st.subPtMatch === 'exact' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/35' : 'bg-blue-500/15 text-blue-300 border-blue-500/30'}">${esc(st.subPtLabel)}</span>` : ''}
                 ${/HEVC|x265/i.test(st.codec || '') || st.resolution === '4K' ? '<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold" title="Ficheiro pesado de descodificar: o Mac pode aquecer">⚠ Aquece o Mac</span>' : ''}
               </div>
               <div class="flex items-center gap-2 font-mono text-[11px] shrink-0">

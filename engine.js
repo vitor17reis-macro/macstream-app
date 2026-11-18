@@ -572,6 +572,9 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
 
   const DL_DIR = cacheDir || process.env.MS_CACHE_DIR || path.join(os.tmpdir(), 'macstream-episode-cache');
   const isTempTestDir = path.basename(DL_DIR).startsWith('ms-test-');
+  const isAnyTestDir = path.basename(DL_DIR).startsWith('ms-');
+  const BACKUP_DIR = isAnyTestDir ? path.join(DL_DIR, '_backups') : path.join(path.dirname(DL_DIR), 'backups');
+  const MAX_AUTO_BACKUPS = 14;
   fs.mkdirSync(DL_DIR, { recursive: true });
 
   // Cada torrent é guardado na sua própria subpasta isolada DL_DIR/<infoHash> para nunca sobrepor ficheiros de séries diferentes!
@@ -589,14 +592,103 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
   // =========================================================================
   const CACHE_STATE_PATH = path.join(DL_DIR, 'cache-state.json');
   const USER_STATE_PATH = path.join(DL_DIR, 'user-state.json');
+  const BACKUP_NAME_RE = /^user-state-\d{4}-\d{2}-\d{2}\.json$/;
 
-  function loadUserStateFromDisk() {
+  function listAutoBackups() {
     try {
-      if (fs.existsSync(USER_STATE_PATH)) {
-        const raw = JSON.parse(fs.readFileSync(USER_STATE_PATH, 'utf8'));
-        if (raw && typeof raw === 'object') return raw;
+      if (!fs.existsSync(BACKUP_DIR)) return [];
+      return fs.readdirSync(BACKUP_DIR)
+        .filter(n => BACKUP_NAME_RE.test(n))
+        .map(name => {
+          try {
+            const st = fs.statSync(path.join(BACKUP_DIR, name));
+            return { name, size: st.size, mtime: st.mtimeMs };
+          } catch (e) { return null; }
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.name.localeCompare(a.name));
+    } catch (e) { return []; }
+  }
+
+  function hasMeaningfulUserState(st) {
+    if (!st || typeof st !== 'object') return false;
+    return Object.keys(st.watchProgressMap || {}).length > 0
+      || Object.keys(st.libraryMap || {}).length > 0
+      || (Array.isArray(st.iptvFavorites) && st.iptvFavorites.length > 0);
+  }
+
+  function sanitizeUserStateObject(raw) {
+    const r = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+    const out = {
+      watchProgressMap: sanitizeStateMap(r.watchProgressMap),
+      libraryMap: sanitizeStateMap(r.libraryMap),
+      iptvFavorites: Array.isArray(r.iptvFavorites) ? r.iptvFavorites.slice(0, 5000) : [],
+      iptvHistory: Array.isArray(r.iptvHistory) ? r.iptvHistory.slice(0, 5000) : [],
+      iptvPinnedCategories: Array.isArray(r.iptvPinnedCategories) ? r.iptvPinnedCategories.slice(0, 5000) : [],
+      introMap: sanitizeStateMap(r.introMap),
+      updatedAt: Number(r.updatedAt) || Date.now()
+    };
+    if (Array.isArray(r.addons)) out.addons = r.addons.slice(0, 500);
+    if (typeof r.debridProvider === 'string') out.debridProvider = r.debridProvider;
+    if (typeof r.tmdbApiKey === 'string') out.tmdbApiKey = r.tmdbApiKey;
+    return out;
+  }
+
+  function writeUserStateAtomically(stateObj) {
+    try {
+      const tmp = USER_STATE_PATH + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(stateObj, null, 2));
+      fs.renameSync(tmp, USER_STATE_PATH);
+    } catch (e) {}
+  }
+
+  function maybeWriteAutoBackup(stateObj) {
+    if (!hasMeaningfulUserState(stateObj)) return;
+    try {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+      const day = new Date().toISOString().slice(0, 10);
+      const target = path.join(BACKUP_DIR, `user-state-${day}.json`);
+      const serialized = JSON.stringify(stateObj, null, 2);
+      const newBytes = Buffer.byteLength(serialized);
+      if (fs.existsSync(target)) {
+        const st = fs.statSync(target);
+        if ((Date.now() - st.mtimeMs) < 5 * 60 * 1000 && st.size >= newBytes) return;
+      }
+      const tmp = target + '.tmp';
+      fs.writeFileSync(tmp, serialized);
+      fs.renameSync(tmp, target);
+      const all = listAutoBackups();
+      if (all.length > MAX_AUTO_BACKUPS) {
+        all.slice(MAX_AUTO_BACKUPS).forEach(old => {
+          try { fs.rmSync(path.join(BACKUP_DIR, old.name), { force: true }); } catch (e) {}
+        });
       }
     } catch (e) {}
+  }
+
+  function loadUserStateFromDisk() {
+    let brokenOrMissing = !fs.existsSync(USER_STATE_PATH);
+    if (!brokenOrMissing) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(USER_STATE_PATH, 'utf8'));
+        if (raw && typeof raw === 'object') return raw;
+        brokenOrMissing = true;
+      } catch (e) {
+        brokenOrMissing = true;
+      }
+    }
+    if (brokenOrMissing) {
+      for (const b of listAutoBackups()) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, b.name), 'utf8'));
+          if (raw && typeof raw === 'object' && hasMeaningfulUserState(raw)) {
+            const recovered = sanitizeUserStateObject(raw);
+            writeUserStateAtomically(recovered);
+            return recovered;
+          }
+        } catch (e) {}
+      }
+    }
     return {
       watchProgressMap: {},
       libraryMap: {},
@@ -645,16 +737,29 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     };
     if (Array.isArray(p.addons)) merged.addons = p.addons.slice(0, 500);
     else if (Array.isArray(current.addons)) merged.addons = current.addons;
-    try {
-      const tmp = USER_STATE_PATH + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
-      fs.renameSync(tmp, USER_STATE_PATH);
-    } catch (e) {}
+    writeUserStateAtomically(merged);
+    maybeWriteAutoBackup(merged);
     return merged;
   }
   const MAX_CACHED_EPISODES = 5;
   const MAX_VIDEO_FILE_BYTES = 35 * 1024 * 1024 * 1024;
   const MAX_TOTAL_CACHE_BYTES = 12 * 1024 * 1024 * 1024;
+  const MIN_FREE_DISK_BYTES = 10 * 1024 * 1024 * 1024;
+  const LOW_DISK_CACHE_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
+  function getDiskFreeBytes(targetDir = DL_DIR) {
+    if (process.env.MS_TEST_FREE_BYTES && /^\d+$/.test(process.env.MS_TEST_FREE_BYTES)) {
+      return Number(process.env.MS_TEST_FREE_BYTES);
+    }
+    try {
+      if (typeof fs.statfsSync === 'function') {
+        const st = fs.statfsSync(targetDir);
+        if (st && Number.isFinite(st.bavail) && Number.isFinite(st.bsize)) {
+          return Number(st.bavail) * Number(st.bsize);
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
   const cacheManifest = { items: {}, primaryHash: null, preloadHash: null };
 
   function makeCacheKey(hash, idx) {
@@ -766,6 +871,34 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     } catch (e) {}
   }
   loadCacheManifest();
+
+  function pruneOrphanCacheFiles() {
+    if (isAnyTestDir) return;
+    try {
+      const activeHashes = new Set(Object.values(cacheManifest.items).map(x => String(x.infoHash || '').toLowerCase()).filter(Boolean));
+      for (const ent of fs.readdirSync(DL_DIR)) {
+        if (ent === 'cache-state.json' || ent === 'user-state.json' || ent === '_backups' || ent.endsWith('.tmp')) continue;
+        const hashMatch = ent.match(/^([a-f0-9]{40})/i);
+        if (hashMatch && activeHashes.has(hashMatch[1].toLowerCase())) continue;
+        try { fs.rmSync(path.join(DL_DIR, ent), { recursive: true, force: true }); } catch (e) {}
+      }
+      invalidateDirSizeCache();
+    } catch (e) {}
+  }
+  pruneOrphanCacheFiles();
+
+  let startupRemuxTimer = null;
+  if (!isAnyTestDir && ffmpegPath) {
+    startupRemuxTimer = setTimeout(() => {
+      try {
+        const pending = Object.values(cacheManifest.items).find(it =>
+          it && it.completed && !it.remuxReady && it.localPath && fs.existsSync(it.localPath)
+        );
+        if (pending) triggerAutoRemuxIfNeeded(pending.infoHash, pending.fileIdx || 0, pending.localPath, pending.name);
+      } catch (e) {}
+    }, 4000);
+    if (typeof startupRemuxTimer.unref === 'function') startupRemuxTimer.unref();
+  }
 
   function getRemuxMp4Path(hash, idx) {
     return path.join(DL_DIR, `${String(hash).toLowerCase()}_${idx || 0}.remux.mp4`);
@@ -886,15 +1019,22 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     const isHevc = (cachedTracks && /hevc|h265/i.test(cachedTracks.video || '')) || /x265|hevc|h\.?265/i.test(fileName || '');
     const args = [
       '-hide_banner', '-loglevel', 'error', '-y',
+      '-fflags', '+genpts+discardcorrupt',
       '-i', localPath,
       '-map', '0:v:0', '-map', '0:a:0?',
       '-c:v', 'copy'
     ];
     if (isHevc) args.push('-tag:v', 'hvc1');
-    args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-movflags', '+faststart', '-f', 'mp4', tmpPath);
+    args.push('-avoid_negative_ts', 'make_zero', '-max_muxing_queue_size', '1024', '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-movflags', '+faststart', '-f', 'mp4', tmpPath);
 
     const p = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     remuxProcs.set(key, p);
+    let remuxErrTail = '';
+    if (p.stderr) {
+      p.stderr.on('data', d => {
+        remuxErrTail = (remuxErrTail + String(d)).slice(-400);
+      });
+    }
     p.on('close', (code) => {
       remuxProcs.delete(key);
       const curEntry = getCacheEntry(h, fIdx);
@@ -909,6 +1049,7 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
           }
         } catch (e) {}
       } else {
+        if (code !== 0) console.error('[remux] falhou:', code, remuxErrTail.trim());
         try { fs.rmSync(tmpPath, { force: true }); } catch (e) {}
         if (curEntry) { curEntry.remuxing = false; saveCacheManifest(); }
       }
@@ -990,9 +1131,25 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     saveCacheManifest();
   }
 
-  // Mantém até MAX_CACHED_EPISODES (8) episódios na cache sem NUNCA apagar episódios já descarregados
-  // quando o utilizador vê outro episódio (ex: ver The Office depois de descarregar Tulsa King).
+  function evictCacheBySeries(imdbId) {
+    const cleanId = String(imdbId || '').trim();
+    if (!/^(tt\d+|cache-[a-f0-9]{40}|[a-zA-Z0-9_-]{3,64})$/.test(cleanId)) {
+      return { ok: false, error: 'Identificador de série inválido.' };
+    }
+    const targets = Object.values(cacheManifest.items).filter(it => it && it.imdbId === cleanId);
+    for (const it of targets) {
+      evictCacheEntry(it.infoHash, it.fileIdx);
+    }
+    return { ok: true, imdbId: cleanId, removedCount: targets.length };
+  }
+
+  // Mantém até MAX_CACHED_EPISODES episódios na cache (ou reduz se o SSD tiver < 10 GB livres)
   function enforceCachePolicy(activeHash, keepPreloadHash = null) {
+    const freeBytes = getDiskFreeBytes(DL_DIR);
+    const lowDisk = typeof freeBytes === 'number' && freeBytes < MIN_FREE_DISK_BYTES;
+    const effectiveMaxEpisodes = lowDisk ? 2 : MAX_CACHED_EPISODES;
+    const effectiveMaxCacheBytes = lowDisk ? Math.min(MAX_TOTAL_CACHE_BYTES, LOW_DISK_CACHE_LIMIT_BYTES) : MAX_TOTAL_CACHE_BYTES;
+
     const act = activeHash ? activeHash.toLowerCase() : null;
     if (act && cacheManifest.preloadHash === act) {
       cacheManifest.preloadHash = null;
@@ -1010,7 +1167,7 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     let totalKeepBytes = 0;
     keepKeys.forEach(k => { totalKeepBytes += (cacheManifest.items[k] && cacheManifest.items[k].length) || 0; });
 
-    if (keepKeys.size < MAX_CACHED_EPISODES) {
+    if (keepKeys.size < effectiveMaxEpisodes) {
       const remaining = allKeys
         .filter(k => !keepKeys.has(k))
         .sort((a, b) => {
@@ -1022,9 +1179,9 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
           return (ib.updatedAt || 0) - (ia.updatedAt || 0);
         });
       for (const k of remaining) {
-        if (keepKeys.size >= MAX_CACHED_EPISODES) break;
+        if (keepKeys.size >= effectiveMaxEpisodes) break;
         const itemLen = (cacheManifest.items[k] && cacheManifest.items[k].length) || 0;
-        if (totalKeepBytes + itemLen > MAX_TOTAL_CACHE_BYTES) continue;
+        if (totalKeepBytes + itemLen > effectiveMaxCacheBytes) continue;
         keepKeys.add(k);
         totalKeepBytes += itemLen;
       }
@@ -2411,6 +2568,36 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
       return json(res, 200, { ok: true, state: loadUserStateFromDisk() });
     }
 
+    if (parts[0] === 'backups') {
+      if (parts[1] === 'restore' && req.method === 'POST') {
+        let parsedBody = '';
+        try {
+          const rb = await readBodyWithLimit(req, 64e3);
+          if (rb.tooBig) return json(res, 413, { ok: false });
+          parsedBody = rb.body;
+        } catch (e) { return json(res, 413, { ok: false }); }
+        try {
+          const j = JSON.parse(parsedBody || '{}');
+          const name = String(j.name || '');
+          if (!BACKUP_NAME_RE.test(name)) {
+            return json(res, 400, { ok: false, error: 'Nome de backup inválido.' });
+          }
+          const fp = path.join(BACKUP_DIR, name);
+          if (!fs.existsSync(fp)) {
+            return json(res, 404, { ok: false, error: 'Backup não encontrado.' });
+          }
+          const raw = JSON.parse(fs.readFileSync(fp, 'utf8'));
+          const restored = sanitizeUserStateObject(raw);
+          restored.updatedAt = Date.now();
+          writeUserStateAtomically(restored);
+          return json(res, 200, { ok: true, state: restored });
+        } catch (e) {
+          return json(res, 400, { ok: false, error: 'Falha ao restaurar backup.' });
+        }
+      }
+      return json(res, 200, { ok: true, dir: BACKUP_DIR, files: listAutoBackups() });
+    }
+
     if (parts[0] === 'detect-intro' && parts.length >= 3) {
       const h = parts[1].toLowerCase();
       const idx = parseInt(parts[2], 10);
@@ -2831,10 +3018,13 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
         };
       }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
+      const diskFreeBytes = getDiskFreeBytes(DL_DIR);
       return json(res, 200, {
         ok: true,
         cacheDir: DL_DIR,
         bytes: dirSize(DL_DIR),
+        diskFreeBytes,
+        lowDiskSpace: Boolean(typeof diskFreeBytes === 'number' && diskFreeBytes < MIN_FREE_DISK_BYTES),
         primaryHash: cacheManifest.primaryHash,
         preloadHash: cacheManifest.preloadHash,
         items
@@ -2919,6 +3109,23 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
       return json(res, 200, r);
     }
 
+    if (parts[0] === 'cache-remove-series' && req.method === 'POST') {
+      let parsedBody = '';
+      try {
+        const rb = await readBodyWithLimit(req, 16e3);
+        if (rb.tooBig) return json(res, 413, { ok: false });
+        parsedBody = rb.body;
+      } catch (e) { return json(res, 413, { ok: false }); }
+      try {
+        const j = JSON.parse(parsedBody || '{}');
+        const out = evictCacheBySeries(j.imdbId);
+        if (!out.ok) return json(res, 400, out);
+        return json(res, 200, out);
+      } catch (e) {
+        return json(res, 400, { ok: false, error: 'JSON inválido.' });
+      }
+    }
+
     if (parts[0] === 'cache-remove' && parts.length >= 2) {
       const h = (parts[1] || '').toLowerCase();
       const idx = parts[2] !== undefined ? parseInt(parts[2], 10) : 0;
@@ -2926,24 +3133,19 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
         return json(res, 400, { ok: false, error: 'Parâmetros inválidos.' });
       }
       const key = makeCacheKey(h, idx);
-      const entry = cacheManifest.items[key];
-      if (entry && entry.localPath) {
-        try { fs.rmSync(entry.localPath, { recursive: true, force: true }); } catch (e) {}
-      }
-      delete cacheManifest.items[key];
-      if (client) {
-        const t = client.get(h);
-        if (t) {
-          try { t.destroy({ destroyStore: true }); } catch (e) {}
-        }
-      }
-      invalidateDirSizeCache();
-      try { saveCacheManifest(); } catch (e) {}
+      evictCacheEntry(h, idx);
       return json(res, 200, { ok: true, removed: key });
     }
 
     if (parts[0] === 'cache') {
-      return json(res, 200, { ok: true, bytes: dirSize(DL_DIR), items: Object.keys(cacheManifest.items).length });
+      const diskFreeBytes = getDiskFreeBytes(DL_DIR);
+      return json(res, 200, {
+        ok: true,
+        bytes: dirSize(DL_DIR),
+        diskFreeBytes,
+        lowDiskSpace: Boolean(typeof diskFreeBytes === 'number' && diskFreeBytes < MIN_FREE_DISK_BYTES),
+        items: Object.keys(cacheManifest.items).length
+      });
     }
 
     if (parts[0] === 'clear') {
@@ -2957,7 +3159,7 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
       invalidateDirSizeCache();
       try {
         for (const ent of fs.readdirSync(DL_DIR)) {
-          if (ent === 'user-state.json') continue;
+          if (ent === 'user-state.json' || ent === '_backups') continue;
           fs.rmSync(path.join(DL_DIR, ent), { recursive: true, force: true });
         }
       } catch (e) {}
@@ -3041,6 +3243,7 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     setBattery(on) { batteryMode = !!on; },
     stop() {
       console.error = origErr;
+      if (startupRemuxTimer) { clearTimeout(startupRemuxTimer); startupRemuxTimer = null; }
       killAllProcs();
       for (const [, s] of activePumps) { try { s.destroy(); } catch (e) {} }
       activePumps.clear();

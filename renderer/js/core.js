@@ -512,6 +512,8 @@
         iptvGroupVariants: localStorage.getItem('ms_iptv_group_variants') !== '0',
         iptvActivePortal: localStorage.getItem('ms_iptv_portal') || 'ALL',
         iptvPinnedCategories: storage.get('ms_iptv_pinned_cats', []),
+        iptvAutoPip: localStorage.getItem('ms_iptv_auto_pip') !== '0',
+        streamsPtOnly: false,
         iptvLocalFilter: '',
         iptvPortalFilter: '',
         addonPingMap: {},
@@ -749,7 +751,25 @@
         engineHelpText: document.getElementById('engineHelpText'),
         helpTryWebtorrentBtn: document.getElementById('helpTryWebtorrentBtn'),
         helpRetryStremioBtn: document.getElementById('helpRetryStremioBtn'),
-        helpOpenSettingsBtn: document.getElementById('helpOpenSettingsBtn')
+        helpOpenSettingsBtn: document.getElementById('helpOpenSettingsBtn'),
+        updateAvailableBtn: document.getElementById('updateAvailableBtn'),
+        iptvRecallChannelBtn: document.getElementById('iptvRecallChannelBtn'),
+        iptvAutoPipToggle: document.getElementById('iptvAutoPipToggle'),
+        autoBackupSelect: document.getElementById('autoBackupSelect'),
+        restoreAutoBackupBtn: document.getElementById('restoreAutoBackupBtn'),
+        openBackupsFolderBtn: document.getElementById('openBackupsFolderBtn'),
+        checkUpdatesBtn: document.getElementById('checkUpdatesBtn'),
+        openUpdateReleaseBtn: document.getElementById('openUpdateReleaseBtn'),
+        settingsAppVersionLabel: document.getElementById('settingsAppVersionLabel'),
+        updateCheckStatusLabel: document.getElementById('updateCheckStatusLabel'),
+        openShortcutsModalBtn: document.getElementById('openShortcutsModalBtn'),
+        shortcutsModal: document.getElementById('shortcutsModal'),
+        closeShortcutsModalBtn: document.getElementById('closeShortcutsModalBtn'),
+        streamsPtSubFilterBtn: document.getElementById('streamsPtSubFilterBtn'),
+        icloudBackupStatusLabel: document.getElementById('icloudBackupStatusLabel'),
+        icloudExportBtn: document.getElementById('icloudExportBtn'),
+        icloudRestoreBtn: document.getElementById('icloudRestoreBtn'),
+        icloudChooseDirBtn: document.getElementById('icloudChooseDirBtn')
       };
 
       // =======================================================================
@@ -922,7 +942,7 @@
         } catch (e) {}
       }
 
-      function exportUserBackupJson() {
+      function buildSafeExportPayload() {
         const payload = buildLocalUserStatePayload(true);
         delete payload.tmdbApiKey;
         delete payload.debridProvider;
@@ -943,6 +963,11 @@
             return { ...a, base };
           });
         }
+        return payload;
+      }
+
+      function exportUserBackupJson() {
+        const payload = buildSafeExportPayload();
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -961,34 +986,7 @@
         reader.onload = async () => {
           try {
             const st = JSON.parse(String(reader.result || '{}'));
-            if (!st || typeof st !== 'object') throw new Error('Formato inválido');
-            if (st.watchProgressMap && typeof st.watchProgressMap === 'object') {
-              for (const [k, rec] of Object.entries(st.watchProgressMap)) {
-                if (rec && rec.key) {
-                  state.watchProgressMap[k] = rec;
-                  await CineDB.put('watch_progress', rec);
-                }
-              }
-            }
-            if (st.libraryMap && typeof st.libraryMap === 'object') {
-              for (const [id, it] of Object.entries(st.libraryMap)) {
-                if (it && it.imdbId) {
-                  state.libraryMap[id] = it;
-                  await CineDB.put('library', it);
-                }
-              }
-            }
-            if (Array.isArray(st.iptvFavorites)) {
-              state.iptvFavorites = st.iptvFavorites;
-              storage.set('macstream_favs', state.iptvFavorites);
-            }
-            if (Array.isArray(st.iptvPinnedCategories)) {
-              state.iptvPinnedCategories = st.iptvPinnedCategories;
-              storage.set('ms_iptv_pinned_cats', state.iptvPinnedCategories);
-            }
-            syncUserStateToDisk(true, true);
-            renderAllSections();
-            if (state.appMode === 'iptv') renderIptvChannelList();
+            await applyImportedUserState(st);
             showToast('📂 Backup Local restaurado com sucesso!');
           } catch (e) {
             showToast('Ficheiro de backup inválido.');
@@ -997,12 +995,53 @@
         reader.readAsText(file);
       }
 
+      async function applyImportedUserState(st) {
+        if (!st || typeof st !== 'object' || Array.isArray(st)) throw new Error('Formato inválido');
+        if (st.watchProgressMap && typeof st.watchProgressMap === 'object') {
+          for (const [k, rec] of Object.entries(st.watchProgressMap)) {
+            if (rec && rec.key) {
+              state.watchProgressMap[k] = rec;
+              await CineDB.put('watch_progress', rec);
+            }
+          }
+        }
+        if (st.libraryMap && typeof st.libraryMap === 'object') {
+          for (const [id, it] of Object.entries(st.libraryMap)) {
+            if (it && it.imdbId) {
+              state.libraryMap[id] = it;
+              await CineDB.put('library', it);
+            }
+          }
+        }
+        if (Array.isArray(st.iptvFavorites)) {
+          state.iptvFavorites = st.iptvFavorites;
+          storage.set('macstream_favs', state.iptvFavorites);
+        }
+        if (Array.isArray(st.iptvPinnedCategories)) {
+          state.iptvPinnedCategories = st.iptvPinnedCategories;
+          storage.set('ms_iptv_pinned_cats', state.iptvPinnedCategories);
+        }
+        if (st.introMap && typeof st.introMap === 'object') {
+          for (const [ik, iv] of Object.entries(st.introMap)) {
+            if (ik && iv) {
+              try { localStorage.setItem(ik, JSON.stringify(iv)); } catch (e) {}
+            }
+          }
+        }
+        syncUserStateToDisk(true, true);
+        renderAllSections();
+        if (state.appMode === 'iptv') renderIptvChannelList();
+      }
+
       // =======================================================================
       // 5B. HYBRID WORKSPACE SWITCHER (CINE STREMIO <-> LIVE TV IPTV)
       // =======================================================================
       function setAppMode(mode) {
         state.appMode = mode;
         if (mode === 'iptv') {
+          if (document.pictureInPictureElement === el.iptvPrimaryVideo) {
+            document.exitPictureInPicture().catch(() => {});
+          }
           el.cineWorkspaceView.classList.add('hidden');
           el.iptvWorkspaceView.classList.remove('hidden');
           el.toggleIptvSidebarBtn.classList.remove('hidden');
@@ -1017,15 +1056,39 @@
           if (!state.iptvCurrentChannelId && state.iptvChannels.length > 0) {
             state.iptvCurrentChannelId = state.iptvChannels[0].id;
           }
-          if (state.iptvCurrentChannelId && !el.iptvPrimaryVideo.getAttribute('src')) {
+          if (state.iptvCurrentChannelId && !el.iptvPrimaryVideo.getAttribute('src') && document.pictureInPictureElement !== el.iptvPrimaryVideo) {
             playIptvChannelById(state.iptvCurrentChannelId);
           }
         } else {
-          // Liberta imediatamente streams e processos FFmpeg remux ao voltar para Séries/Filmes
-          destroyPrimaryIptvEngines();
+          // Fecha sempre o ecrã secundário; se o canal principal estiver a dar e Auto-PiP ativo, mantém em Picture-in-Picture
           destroySecondaryIptvEngines();
-          el.iptvPrimaryVideo.pause();
           el.iptvSecondaryVideo.pause();
+          const canAutoPip = Boolean(
+            state.iptvAutoPip &&
+            el.iptvPrimaryVideo &&
+            !el.iptvPrimaryVideo.paused &&
+            el.iptvPrimaryVideo.readyState >= 2 &&
+            (el.iptvPrimaryVideo.currentSrc || el.iptvPrimaryVideo.getAttribute('src')) &&
+            document.pictureInPictureEnabled &&
+            typeof el.iptvPrimaryVideo.requestPictureInPicture === 'function'
+          );
+          if (canAutoPip) {
+            el.iptvPrimaryVideo.requestPictureInPicture().then(() => {
+              showToast('📺 TV em Direto em Mini-Player (PiP)');
+              el.iptvPrimaryVideo.addEventListener('leavepictureinpicture', () => {
+                if (state.appMode !== 'iptv') {
+                  destroyPrimaryIptvEngines();
+                  el.iptvPrimaryVideo.pause();
+                }
+              }, { once: true });
+            }).catch(() => {
+              destroyPrimaryIptvEngines();
+              el.iptvPrimaryVideo.pause();
+            });
+          } else {
+            destroyPrimaryIptvEngines();
+            el.iptvPrimaryVideo.pause();
+          }
           const sigPop = document.getElementById('iptvSignalPopover');
           if (sigPop) sigPop.classList.add('hidden');
 

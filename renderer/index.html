@@ -945,6 +945,8 @@
 
     <!-- Right: Compact Action Buttons -->
     <div class="flex items-center gap-1.5 shrink-0">
+      <button id="updateAvailableBtn" type="button" class="hidden px-2.5 py-1 rounded-xl text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 mac-transition items-center gap-1" title="Nova versão do MacStream disponível no GitHub Releases"></button>
+
       <button id="openMagnetModalBtn" type="button" class="p-2 rounded-xl text-xs font-medium bg-[#131825]/80 hover:bg-slate-800 text-indigo-300 border mac-border mac-transition flex items-center gap-1" title="Colar Magnet Link ou abrir ficheiro .torrent">
         <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -967,6 +969,8 @@
       <button id="headerBackupStatusBtn" type="button" class="hidden" title="Persistência Local">
         <span id="headerBackupStatusLabel">Local</span>
       </button>
+
+      <button id="openShortcutsModalBtn" type="button" class="p-2 rounded-xl text-xs font-mono font-bold bg-[#131825]/80 hover:bg-slate-800 text-slate-300 border mac-border mac-transition" title="Atalhos de Teclado (⌘/)">?</button>
 
       <button id="openSettingsModalBtn" type="button" class="p-2 rounded-xl text-xs font-semibold bg-[#131825]/80 hover:bg-slate-800 text-slate-200 border mac-border mac-transition flex items-center justify-center" title="Definições, Add-ons, Debrid & Backup">
         <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -1428,6 +1432,10 @@
           <label for="macAirMultiViewOptToggle" class="text-slate-300 cursor-pointer">Otimizador Duplo Ecrã (MacBook Air)</label>
           <input id="macAirMultiViewOptToggle" type="checkbox" checked class="accent-indigo-500 w-4 h-4 rounded cursor-pointer" />
         </div>
+        <div class="flex items-center justify-between">
+          <label for="iptvAutoPipToggle" class="text-slate-300 cursor-pointer">Mini-Player PiP ao ir para Cine</label>
+          <input id="iptvAutoPipToggle" type="checkbox" checked class="accent-indigo-500 w-4 h-4 rounded cursor-pointer" />
+        </div>
         <div class="flex items-center justify-between pt-1">
           <label for="sleepTimerSelect" class="text-slate-400">Sleep Timer</label>
           <select id="sleepTimerSelect" class="bg-[#090d16] border mac-border rounded-lg px-2 py-1 text-xs text-slate-200">
@@ -1578,6 +1586,7 @@
           <div class="flex items-center gap-1">
             <button id="iptvPrevChannelBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300" title="Canal Anterior">◀</button>
             <button id="iptvNextChannelBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300" title="Próximo Canal">▶</button>
+            <button id="iptvRecallChannelBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300" title="Voltar ao canal anterior (Z / Backspace)">↩</button>
             <button id="iptvFavCurrentBtn" type="button" class="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 flex items-center gap-1" title="Favorito (L)">
               <span id="iptvFavCurrentStar" class="text-amber-400">☆</span>
               <span id="iptvFavCurrentLabel" class="hidden sm:inline">Favorito</span>
@@ -1752,6 +1761,7 @@
           <button type="button" data-resfilter="4K" class="res-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition">4K UHD</button>
           <button type="button" data-resfilter="1080p" class="res-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition">1080p</button>
           <button type="button" data-resfilter="720p" class="res-filter-btn px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition">720p</button>
+          <button id="streamsPtSubFilterBtn" type="button" class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#0b0f19] text-slate-300 hover:text-white border mac-border mac-transition" title="Mostrar apenas fontes com legenda PT confirmada ou compatível">💬 Só PT</button>
         </div>
 
         <!-- Quick Custom Magnet Paste inside Stream Panel -->
@@ -2237,6 +2247,39 @@
               <input id="importUserBackupInput" type="file" accept=".json" class="hidden" />
             </label>
           </div>
+          <div class="pt-2 border-t mac-border space-y-1.5">
+            <p class="text-[11px] font-semibold text-slate-300">🕒 Backups Automáticos Diários (últimos 14 dias):</p>
+            <div class="flex flex-wrap items-center gap-2">
+              <select id="autoBackupSelect" class="flex-1 min-w-0 bg-[#131825] border mac-border rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none">
+                <option value="">Sem backups automáticos ainda</option>
+              </select>
+              <button id="restoreAutoBackupBtn" type="button" class="px-3 py-1.5 rounded-xl bg-indigo-600/25 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-500/35 text-xs font-semibold mac-transition">↻ Restaurar</button>
+              <button id="openBackupsFolderBtn" type="button" class="px-3 py-1.5 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border text-xs font-semibold mac-transition" title="Abrir pasta de backups no Finder">📂 Pasta</button>
+            </div>
+          </div>
+          <div class="pt-2 border-t mac-border space-y-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-[11px] font-semibold text-slate-300">☁️ iCloud Drive / Pasta na Cloud (sem chaves nem segredos):</p>
+              <span id="icloudBackupStatusLabel" class="text-[10px] font-mono text-slate-400 truncate">A detetar iCloud Drive...</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="icloudExportBtn" type="button" class="px-3 py-1.5 rounded-xl bg-blue-600/25 hover:bg-blue-600 text-blue-200 hover:text-white border border-blue-500/35 text-xs font-semibold mac-transition">☁️ Guardar no iCloud</button>
+              <button id="icloudRestoreBtn" type="button" class="px-3 py-1.5 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border text-xs font-semibold mac-transition">⬇ Restaurar do iCloud</button>
+              <button id="icloudChooseDirBtn" type="button" class="px-3 py-1.5 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border text-xs font-semibold mac-transition" title="Escolher pasta na Cloud (iCloud Drive, Dropbox, etc.)">📁 Pasta</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Atualizações via GitHub Releases -->
+        <div class="p-4 rounded-xl bg-[#0b0f19] border mac-border flex flex-wrap items-center justify-between gap-2">
+          <div class="min-w-0">
+            <p class="font-bold text-white flex items-center gap-2">🚀 Atualizações (GitHub Releases) <span id="settingsAppVersionLabel" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">v3.0.0</span></p>
+            <p id="updateCheckStatusLabel" class="text-[11px] text-slate-400">Verifica se existe um novo .dmg no GitHub Releases.</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button id="checkUpdatesBtn" type="button" class="px-3 py-1.5 rounded-xl bg-[#131825] hover:bg-slate-800 text-slate-200 border mac-border text-xs font-semibold mac-transition">↻ Verificar</button>
+            <button id="openUpdateReleaseBtn" type="button" class="hidden px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold mac-transition">⬇ Abrir Release</button>
+          </div>
         </div>
 
         <!-- MacBook Air 2019 Hardware Profile -->
@@ -2246,6 +2289,47 @@
             <p class="text-[11px] text-slate-400">Limita conexões WebRTC simultâneas a 25 peers e desativa animações em segundo plano</p>
           </div>
           <input id="ecoModeToggle" type="checkbox" checked class="w-4 h-4 accent-indigo-500 rounded cursor-pointer" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHORTCUTS OVERLAY MODAL (⌘/) -->
+  <div id="shortcutsModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="mac-glass-heavy rounded-2xl border max-w-2xl w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b mac-border pb-3">
+        <div>
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">⌨️ Atalhos de Teclado — MacStream</h3>
+          <p class="text-[11px] text-slate-400">Navegação rápida, player de cinema e controlo de TV em direto</p>
+        </div>
+        <button id="closeShortcutsModalBtn" type="button" class="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-slate-300 hover:text-white border mac-border">✕ Fechar</button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <div class="p-3 rounded-xl bg-[#0b0f19]/90 border mac-border space-y-2">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-300">🎬 Player de Cinema</p>
+          <div class="flex justify-between"><span class="text-slate-300">Pausa / Reproduzir</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">Espaço</kbd></div>
+          <div class="flex justify-between"><span class="text-slate-300">Recuar / Avançar 10s</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">← / →</kbd></div>
+          <div class="flex justify-between"><span class="text-slate-300">Volume / Silenciar</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">↑ ↓ / M</kbd></div>
+          <div class="flex justify-between"><span class="text-slate-300">Ecrã Inteiro / PiP / Ajustar</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">F / P / Z</kbd></div>
+          <div class="flex justify-between"><span class="text-slate-300">Legendas On/Off</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">C</kbd></div>
+          <div class="flex justify-between"><span class="text-slate-300">Atraso de Legendas (-0.5s / +0.5s)</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">G / H</kbd></div>
+          <div class="flex justify-between"><span class="text-slate-300">Calibrar Legendas Automático</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">A</kbd></div>
+        </div>
+        <div class="space-y-3">
+          <div class="p-3 rounded-xl bg-[#0b0f19]/90 border mac-border space-y-2">
+            <p class="text-[11px] font-bold uppercase tracking-wider text-blue-300">📺 TV Direto (IPTV)</p>
+            <div class="flex justify-between"><span class="text-slate-300">Canal Anterior / Seguinte</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">↑ / ↓</kbd></div>
+            <div class="flex justify-between"><span class="text-slate-300">Zapping Recall (último canal)</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">Z / ⌫</kbd></div>
+            <div class="flex justify-between"><span class="text-slate-300">Mostrar/Ocultar Pastas</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">S</kbd></div>
+            <div class="flex justify-between"><span class="text-slate-300">Trocar Sinal / Recarregar</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">B / R</kbd></div>
+            <div class="flex justify-between"><span class="text-slate-300">Favorito / Ecrã Inteiro</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">L / F</kbd></div>
+          </div>
+          <div class="p-3 rounded-xl bg-[#0b0f19]/90 border mac-border space-y-2">
+            <p class="text-[11px] font-bold uppercase tracking-wider text-emerald-300">⌘ Geral</p>
+            <div class="flex justify-between"><span class="text-slate-300">Pesquisa Global</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">⌘K</kbd></div>
+            <div class="flex justify-between"><span class="text-slate-300">Abrir/Fechar este Painel</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">⌘/</kbd></div>
+            <div class="flex justify-between"><span class="text-slate-300">Fechar Modais</span><kbd class="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">ESC</kbd></div>
+          </div>
         </div>
       </div>
     </div>
