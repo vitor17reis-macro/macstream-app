@@ -1,8 +1,13 @@
 'use strict';
 // npm run test:e2e — Testes End-to-End (E2E) da Interface Electron com janela oculta
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { app, BrowserWindow } = require('electron');
+
+const e2eUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'macstream-e2e-'));
+app.setPath('userData', e2eUserData);
 
 const indexPath = path.join(__dirname, '..', 'renderer', 'index.html');
 

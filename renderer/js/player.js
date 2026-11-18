@@ -929,6 +929,25 @@
         if (cur < 2 || !isFinite(dur) || dur <= 0) return;
 
         const { item, season, episode, episodeTitle, stream } = ctx;
+        if (item.type === 'series' && cur >= 10 && !ctx._prevCacheCleaned) {
+          ctx._prevCacheCleaned = true;
+          const app = window.macstreamApp;
+          if (app && app.engineUrl) {
+            const curHash = stream && stream.infoHash ? String(stream.infoHash).toLowerCase() : '';
+            const curIdx = stream && Number.isInteger(stream.fileIdx) ? stream.fileIdx : 0;
+            Object.values(state.watchProgressMap || {}).forEach((r) => {
+              if (!r || r.imdbId !== item.imdbId || !r.completed) return;
+              if (r.season === season && r.episode === episode) return;
+              const rh = r.infoHash ? String(r.infoHash).toLowerCase() : '';
+              const rIdx = Number.isInteger(r.fileIdx) && r.fileIdx >= 0 ? r.fileIdx : 0;
+              if (/^[a-f0-9]{40}$/.test(rh) && (rh !== curHash || rIdx !== curIdx)) {
+                fetch(`${app.engineUrl}/cache-remove/${encodeURIComponent(rh)}/${rIdx}`, { method: 'POST' })
+                  .then(() => { if (typeof refreshEpisodeCacheList === 'function') refreshEpisodeCacheList(); })
+                  .catch(() => {});
+              }
+            });
+          }
+        }
         const key = getProgressKey(item.imdbId, item.type, season, episode);
         const remaining = dur - cur;
 

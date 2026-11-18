@@ -652,9 +652,9 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     } catch (e) {}
     return merged;
   }
-  const MAX_CACHED_EPISODES = 8;
+  const MAX_CACHED_EPISODES = 5;
   const MAX_VIDEO_FILE_BYTES = 35 * 1024 * 1024 * 1024;
-  const MAX_TOTAL_CACHE_BYTES = 45 * 1024 * 1024 * 1024;
+  const MAX_TOTAL_CACHE_BYTES = 12 * 1024 * 1024 * 1024;
   const cacheManifest = { items: {}, primaryHash: null, preloadHash: null };
 
   function makeCacheKey(hash, idx) {
@@ -2917,6 +2917,29 @@ function startEngine({ port = 11471, ffmpegPath = null, cacheDir, token = '', on
     if (parts[0] === 'tracks' && parts.length >= 3) {
       const r = await probeTracks(parts[1], parseInt(parts[2], 10));
       return json(res, 200, r);
+    }
+
+    if (parts[0] === 'cache-remove' && parts.length >= 2) {
+      const h = (parts[1] || '').toLowerCase();
+      const idx = parts[2] !== undefined ? parseInt(parts[2], 10) : 0;
+      if (!/^[a-f0-9]{40}$/.test(h) || !Number.isInteger(idx) || idx < 0) {
+        return json(res, 400, { ok: false, error: 'Parâmetros inválidos.' });
+      }
+      const key = makeCacheKey(h, idx);
+      const entry = cacheManifest.items[key];
+      if (entry && entry.localPath) {
+        try { fs.rmSync(entry.localPath, { recursive: true, force: true }); } catch (e) {}
+      }
+      delete cacheManifest.items[key];
+      if (client) {
+        const t = client.get(h);
+        if (t) {
+          try { t.destroy({ destroyStore: true }); } catch (e) {}
+        }
+      }
+      invalidateDirSizeCache();
+      try { saveCacheManifest(); } catch (e) {}
+      return json(res, 200, { ok: true, removed: key });
     }
 
     if (parts[0] === 'cache') {

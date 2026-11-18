@@ -210,8 +210,8 @@ function get(port, p, headers) {
       assert.ok(engineJs.includes('MAX_VIDEO_FILE_BYTES = 35 * 1024 * 1024 * 1024'));
     });
 
-    await test('24. Quota MAX_TOTAL_CACHE_BYTES (45 GB) definida em engine.js', async () => {
-      assert.ok(engineJs.includes('MAX_TOTAL_CACHE_BYTES = 45 * 1024 * 1024 * 1024'));
+    await test('24. Quota MAX_TOTAL_CACHE_BYTES (12 GB) definida em engine.js', async () => {
+      assert.ok(engineJs.includes('MAX_TOTAL_CACHE_BYTES = 12 * 1024 * 1024 * 1024'));
     });
 
     await test('25. loadCacheManifest faz reset de remuxing: false no arranque', async () => {
